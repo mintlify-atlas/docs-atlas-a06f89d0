@@ -68,7 +68,7 @@ model Session {
   userAgent String?
   createdAt DateTime @default(now())
   
-  user      User     @rel(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Account {
@@ -81,7 +81,7 @@ model Account {
   accessTokenExpiresAt DateTime?
   createdAt            DateTime  @default(now())
   
-  user                 User      @rel(fields: [userId], references: [id], onDelete: Cascade)
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   @@unique([providerId, accountId])
 }
@@ -300,7 +300,6 @@ POST /api/auth/sign-in
 // Redirect to OAuth provider
 GET /api/auth/sign-in/google
 GET /api/auth/sign-in/github
-GET /api/auth/sign-in/twitter
 ```
 
 <Info>
@@ -323,7 +322,7 @@ GET /api/auth/sign-in/twitter
   </Card>
   
   <Card title="OAuth Providers" icon="shield" href="/guides/oauth">
-    Add Google, GitHub, or Twitter authentication
+    Add Google and GitHub authentication
   </Card>
 </CardGroup>
 
