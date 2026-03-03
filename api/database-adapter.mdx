@@ -1,0 +1,464 @@
+---
+title: DatabaseAdapter
+description: Core database adapter interface for Arraf Auth
+---
+
+The `DatabaseAdapter` interface defines the contract that all database adapters must implement to work with Arraf Auth. It provides a consistent API for managing users, sessions, accounts, and verifications across different database systems.
+
+## Overview
+
+The adapter pattern allows Arraf Auth to work with any database system by implementing a standardized interface. This decouples the authentication logic from the specific database implementation, making it easy to switch databases or use custom storage solutions.
+
+## Interface Definition
+
+```typescript
+interface DatabaseAdapter {
+  // User methods
+  createUser(data: Omit<User, "id" | "createdAt" | "updatedAt">): Promise<User>
+  findUserById(id: string): Promise<User | null>
+  findUserByEmail(email: string): Promise<User | null>
+  findUserByPhone(phone: string): Promise<User | null>
+  updateUser(id: string, data: Partial<User>): Promise<User>
+  deleteUser(id: string): Promise<void>
+  
+  // Session methods
+  createSession(data: Omit<Session, "id" | "createdAt">): Promise<Session>
+  findSession(token: string): Promise<Session | null>
+  updateSession(token: string, data: Partial<Session>): Promise<Session>
+  deleteSession(token: string): Promise<void>
+  deleteUserSessions(userId: string): Promise<void>
+  
+  // Account methods
+  createAccount(data: Omit<Account, "id" | "createdAt">): Promise<Account>
+  findAccount(providerId: string, accountId: string): Promise<Account | null>
+  findAccountsByUserId(userId: string): Promise<Account[]>
+  
+  // Verification methods
+  createVerification(data: Omit<Verification, "id" | "createdAt">): Promise<Verification>
+  findVerification(identifier: string, type: VerificationType): Promise<Verification | null>
+  updateVerification(id: string, data: Partial<Verification>): Promise<Verification>
+  deleteVerification(id: string): Promise<void>
+  deleteExpiredVerifications(): Promise<void>
+}
+```
+
+## User Methods
+
+### createUser
+
+Creates a new user in the database.
+
+<ParamField path="data" type="Omit<User, 'id' | 'createdAt' | 'updatedAt'>" required>
+  User data to create. The adapter will generate `id`, `createdAt`, and `updatedAt` automatically.
+  
+  <expandable title="properties">
+    <ParamField path="email" type="string | null">
+      User's email address. Can be null for phone-only authentication.
+    </ParamField>
+    <ParamField path="phone" type="string | null">
+      User's phone number. Can be null for email-only authentication.
+    </ParamField>
+    <ParamField path="name" type="string | null">
+      User's display name.
+    </ParamField>
+    <ParamField path="emailVerified" type="boolean" required>
+      Whether the email has been verified.
+    </ParamField>
+    <ParamField path="phoneVerified" type="boolean" required>
+      Whether the phone number has been verified.
+    </ParamField>
+    <ParamField path="image" type="string | null">
+      URL to user's profile image.
+    </ParamField>
+  </expandable>
+</ParamField>
+
+<ResponseField name="user" type="User">
+  The created user object with generated `id`, `createdAt`, and `updatedAt` fields.
+</ResponseField>
+
+### findUserById
+
+Finds a user by their unique ID.
+
+<ParamField path="id" type="string" required>
+  The user's unique identifier.
+</ParamField>
+
+<ResponseField name="user" type="User | null">
+  The user object if found, or `null` if no user exists with that ID.
+</ResponseField>
+
+### findUserByEmail
+
+Finds a user by their email address.
+
+<ParamField path="email" type="string" required>
+  The email address to search for.
+</ParamField>
+
+<ResponseField name="user" type="User | null">
+  The user object if found, or `null` if no user exists with that email.
+</ResponseField>
+
+### findUserByPhone
+
+Finds a user by their phone number.
+
+<ParamField path="phone" type="string" required>
+  The phone number to search for.
+</ParamField>
+
+<ResponseField name="user" type="User | null">
+  The user object if found, or `null` if no user exists with that phone number.
+</ResponseField>
+
+### updateUser
+
+Updates an existing user's information.
+
+<ParamField path="id" type="string" required>
+  The ID of the user to update.
+</ParamField>
+
+<ParamField path="data" type="Partial<User>" required>
+  Partial user data to update. Only provided fields will be updated.
+</ParamField>
+
+<ResponseField name="user" type="User">
+  The updated user object.
+</ResponseField>
+
+### deleteUser
+
+Deletes a user from the database.
+
+<ParamField path="id" type="string" required>
+  The ID of the user to delete.
+</ParamField>
+
+<ResponseField name="void" type="void">
+  This method returns nothing on success.
+</ResponseField>
+
+<Note>
+  Deleting a user should cascade to delete their sessions and accounts. Implement this with database constraints or manual cleanup.
+</Note>
+
+## Session Methods
+
+### createSession
+
+Creates a new session for a user.
+
+<ParamField path="data" type="Omit<Session, 'id' | 'createdAt'>" required>
+  Session data to create. The adapter will generate `id` and `createdAt` automatically.
+  
+  <expandable title="properties">
+    <ParamField path="userId" type="string" required>
+      The ID of the user this session belongs to.
+    </ParamField>
+    <ParamField path="token" type="string" required>
+      Unique session token. Must be unique across all sessions.
+    </ParamField>
+    <ParamField path="expiresAt" type="Date" required>
+      When this session expires.
+    </ParamField>
+    <ParamField path="ipAddress" type="string">
+      IP address where the session was created.
+    </ParamField>
+    <ParamField path="userAgent" type="string">
+      Browser/client user agent string.
+    </ParamField>
+  </expandable>
+</ParamField>
+
+<ResponseField name="session" type="Session">
+  The created session object.
+</ResponseField>
+
+### findSession
+
+Finds a session by its token.
+
+<ParamField path="token" type="string" required>
+  The session token to search for.
+</ParamField>
+
+<ResponseField name="session" type="Session | null">
+  The session object if found, or `null` if no session exists with that token.
+</ResponseField>
+
+### updateSession
+
+Updates an existing session.
+
+<ParamField path="token" type="string" required>
+  The token of the session to update.
+</ParamField>
+
+<ParamField path="data" type="Partial<Session>" required>
+  Partial session data to update.
+</ParamField>
+
+<ResponseField name="session" type="Session">
+  The updated session object.
+</ResponseField>
+
+### deleteSession
+
+Deletes a session (used for logout).
+
+<ParamField path="token" type="string" required>
+  The token of the session to delete.
+</ParamField>
+
+<ResponseField name="void" type="void">
+  This method returns nothing on success.
+</ResponseField>
+
+### deleteUserSessions
+
+Deletes all sessions for a specific user.
+
+<ParamField path="userId" type="string" required>
+  The ID of the user whose sessions should be deleted.
+</ParamField>
+
+<ResponseField name="void" type="void">
+  This method returns nothing on success.
+</ResponseField>
+
+## Account Methods
+
+### createAccount
+
+Creates a new account linking a user to an authentication provider.
+
+<ParamField path="data" type="Omit<Account, 'id' | 'createdAt'>" required>
+  Account data to create.
+  
+  <expandable title="properties">
+    <ParamField path="userId" type="string" required>
+      The ID of the user this account belongs to.
+    </ParamField>
+    <ParamField path="providerId" type="string" required>
+      Provider identifier (e.g., "google", "github", "credential").
+    </ParamField>
+    <ParamField path="accountId" type="string" required>
+      Unique account ID from the provider.
+    </ParamField>
+    <ParamField path="accessToken" type="string">
+      OAuth access token or password hash.
+    </ParamField>
+    <ParamField path="refreshToken" type="string">
+      OAuth refresh token.
+    </ParamField>
+    <ParamField path="accessTokenExpiresAt" type="Date">
+      When the access token expires.
+    </ParamField>
+  </expandable>
+</ParamField>
+
+<ResponseField name="account" type="Account">
+  The created account object.
+</ResponseField>
+
+### findAccount
+
+Finds an account by provider and account ID.
+
+<ParamField path="providerId" type="string" required>
+  The provider identifier.
+</ParamField>
+
+<ParamField path="accountId" type="string" required>
+  The account ID from the provider.
+</ParamField>
+
+<ResponseField name="account" type="Account | null">
+  The account object if found, or `null`.
+</ResponseField>
+
+### findAccountsByUserId
+
+Finds all accounts belonging to a user.
+
+<ParamField path="userId" type="string" required>
+  The user's ID.
+</ParamField>
+
+<ResponseField name="accounts" type="Account[]">
+  Array of account objects.
+</ResponseField>
+
+## Verification Methods
+
+### createVerification
+
+Creates a new verification record for OTP or email verification.
+
+<ParamField path="data" type="Omit<Verification, 'id' | 'createdAt'>" required>
+  Verification data to create.
+  
+  <expandable title="properties">
+    <ParamField path="identifier" type="string" required>
+      Email address or phone number being verified.
+    </ParamField>
+    <ParamField path="token" type="string" required>
+      The OTP code or verification token.
+    </ParamField>
+    <ParamField path="type" type="VerificationType" required>
+      Type of verification: `"phone-otp"`, `"email-otp"`, `"email-verification"`, `"password-reset"`, or `"phone-change"`.
+    </ParamField>
+    <ParamField path="expiresAt" type="Date" required>
+      When this verification expires.
+    </ParamField>
+    <ParamField path="attempts" type="number" required>
+      Number of verification attempts made.
+    </ParamField>
+  </expandable>
+</ParamField>
+
+<ResponseField name="verification" type="Verification">
+  The created verification object.
+</ResponseField>
+
+### findVerification
+
+Finds a verification record by identifier and type.
+
+<ParamField path="identifier" type="string" required>
+  The email or phone number.
+</ParamField>
+
+<ParamField path="type" type="VerificationType" required>
+  The verification type.
+</ParamField>
+
+<ResponseField name="verification" type="Verification | null">
+  The verification object if found, or `null`.
+</ResponseField>
+
+### updateVerification
+
+Updates a verification record (typically to increment attempts).
+
+<ParamField path="id" type="string" required>
+  The verification ID.
+</ParamField>
+
+<ParamField path="data" type="Partial<Verification>" required>
+  Partial verification data to update.
+</ParamField>
+
+<ResponseField name="verification" type="Verification">
+  The updated verification object.
+</ResponseField>
+
+### deleteVerification
+
+Deletes a verification record after successful verification.
+
+<ParamField path="id" type="string" required>
+  The verification ID to delete.
+</ParamField>
+
+<ResponseField name="void" type="void">
+  This method returns nothing on success.
+</ResponseField>
+
+### deleteExpiredVerifications
+
+Cleans up expired verification records.
+
+<ResponseField name="void" type="void">
+  This method returns nothing on success.
+</ResponseField>
+
+<Note>
+  This should be called periodically (e.g., via a cron job) to prevent database bloat.
+</Note>
+
+## Creating a Custom Adapter
+
+To create a custom adapter for your database:
+
+```typescript
+import type { DatabaseAdapter } from "@arraf-auth/core"
+
+export function myCustomAdapter(client: MyDBClient): DatabaseAdapter {
+  return {
+    async createUser(data) {
+      // Implement user creation
+    },
+    async findUserById(id) {
+      // Implement user lookup
+    },
+    // ... implement all other methods
+  }
+}
+```
+
+## Official Adapters
+
+Arraf Auth provides official adapters for popular databases:
+
+- [Prisma Adapter](/api/prisma-adapter) - For Prisma ORM
+- [Drizzle Adapter](/api/drizzle-adapter) - For Drizzle ORM
+
+## Type Definitions
+
+The adapter works with these core types:
+
+```typescript
+interface User {
+  id: string
+  email: string | null
+  phone: string | null
+  name: string | null
+  emailVerified: boolean
+  phoneVerified: boolean
+  image: string | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+interface Session {
+  id: string
+  userId: string
+  token: string
+  expiresAt: Date
+  ipAddress?: string
+  userAgent?: string
+  createdAt: Date
+}
+
+interface Account {
+  id: string
+  userId: string
+  providerId: string
+  accountId: string
+  accessToken?: string
+  refreshToken?: string
+  accessTokenExpiresAt?: Date
+  createdAt: Date
+}
+
+interface Verification {
+  id: string
+  identifier: string
+  token: string
+  type: VerificationType
+  expiresAt: Date
+  attempts: number
+  createdAt: Date
+}
+
+type VerificationType =
+  | "phone-otp"
+  | "email-otp"
+  | "email-verification"
+  | "password-reset"
+  | "phone-change"
+```

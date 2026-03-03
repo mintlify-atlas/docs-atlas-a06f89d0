@@ -1,0 +1,209 @@
+---
+title: AuthConfig
+description: Configuration interface for Arraf Auth
+---
+
+## Overview
+
+The `AuthConfig` interface defines all configuration options for initializing Arraf Auth with `createAuth`.
+
+```typescript
+interface AuthConfig {
+  secret: string
+  database: DatabaseAdapter
+  session?: SessionConfig
+  providers?: OAuthProvider[]
+  plugins?: Plugin[]
+  sms?: SMSProvider
+  otp?: OTPConfig
+  trustedOrigins?: string[]
+}
+```
+
+## Fields
+
+<ParamField path="secret" type="string" required>
+  A secret key used for signing and encrypting session tokens. This should be a long, random string stored securely in environment variables.
+
+  <Warning>
+    Never commit your secret to version control. Use environment variables like `process.env.AUTH_SECRET`.
+  </Warning>
+
+  ```typescript
+  secret: process.env.AUTH_SECRET!
+  ```
+</ParamField>
+
+<ParamField path="database" type="DatabaseAdapter" required>
+  The database adapter instance for persisting users, sessions, accounts, and verifications.
+
+  ```typescript
+  import { DrizzleAdapter } from "@arraf-auth/adapter-drizzle"
+  import { db } from "./db"
+
+  database: DrizzleAdapter(db)
+  ```
+
+  See [Database Adapter API](/api/database-adapter), [Prisma Adapter](/api/prisma-adapter), and [Drizzle Adapter](/api/drizzle-adapter) for details.
+</ParamField>
+
+<ParamField path="session" type="SessionConfig">
+  Session configuration including strategy, expiration, and cookie settings. Defaults to JWT strategy with 7 days expiration.
+
+  See [SessionConfig](/api/session-config) for all available options.
+
+  ```typescript
+  session: {
+    strategy: "database",
+    expiresIn: "30d",
+    cookieName: "auth_token",
+  }
+  ```
+</ParamField>
+
+<ParamField path="providers" type="OAuthProvider[]">
+  Array of OAuth providers for social authentication (Google, GitHub, etc.).
+
+  ```typescript
+  import { Google, GitHub } from "@arraf-auth/providers"
+
+  providers: [
+    Google({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
+    GitHub({
+      clientId: process.env.GITHUB_CLIENT_ID!,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+    }),
+  ]
+  ```
+
+  See [OAuth Provider API](/api/oauth-provider), [Google Provider](/api/google-provider), and [GitHub Provider](/api/github-provider) for details.
+</ParamField>
+
+<ParamField path="plugins" type="Plugin[]">
+  Array of plugins to extend Arraf Auth functionality with custom routes and hooks.
+
+  ```typescript
+  interface Plugin {
+    id: string
+    routes?: Record<string, RouteHandler>
+    hooks?: PluginHooks
+  }
+  ```
+
+  Plugins can add custom routes and lifecycle hooks for sign-in, sign-up, and OTP verification events.
+</ParamField>
+
+<ParamField path="sms" type="SMSProvider">
+  SMS provider for sending OTP codes via text message.
+
+  ```typescript
+  interface SMSProvider {
+    send(params: SMSSendParams): Promise<SMSSendResult>
+  }
+
+  interface SMSSendParams {
+    to: string
+    message: string
+  }
+  ```
+
+  See [SMS Provider API](/api/sms-provider) for implementation details and examples.
+</ParamField>
+
+<ParamField path="otp" type="OTPConfig">
+  Configuration for one-time password (OTP) behavior including length, expiration, and message templates.
+
+  See [OTPConfig](/api/otp-config) for all available options.
+
+  ```typescript
+  otp: {
+    length: 6,
+    expiresIn: 300, // 5 minutes in seconds
+    maxAttempts: 3,
+  }
+  ```
+</ParamField>
+
+<ParamField path="trustedOrigins" type="string[]">
+  Array of trusted origin URLs for CORS and CSRF protection. Requests from origins not in this list will be rejected.
+
+  ```typescript
+  trustedOrigins: [
+    "http://localhost:3000",
+    "https://app.example.com",
+  ]
+  ```
+
+  <Info>
+    Always include all domains where your frontend application runs.
+  </Info>
+</ParamField>
+
+## Complete Example
+
+```typescript
+import { createAuth } from "@arraf-auth/core"
+import { DrizzleAdapter } from "@arraf-auth/adapter-drizzle"
+import { Google, GitHub } from "@arraf-auth/providers"
+import { Twilio } from "@arraf-auth/sms-twilio"
+import { db } from "./db"
+
+const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  
+  database: DrizzleAdapter(db),
+  
+  session: {
+    strategy: "database",
+    expiresIn: "30d",
+    cookieName: "session_token",
+    cookieOptions: {
+      secure: true,
+      sameSite: "lax",
+    },
+  },
+  
+  providers: [
+    Google({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
+    GitHub({
+      clientId: process.env.GITHUB_CLIENT_ID!,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+    }),
+  ],
+  
+  sms: Twilio({
+    accountSid: process.env.TWILIO_ACCOUNT_SID!,
+    authToken: process.env.TWILIO_AUTH_TOKEN!,
+    fromNumber: process.env.TWILIO_PHONE_NUMBER!,
+  }),
+  
+  otp: {
+    length: 6,
+    expiresIn: 600, // 10 minutes
+    maxAttempts: 5,
+    messageTemplate: (otp, appName) => 
+      `Your ${appName || "App"} verification code is: ${otp}`,
+  },
+  
+  trustedOrigins: [
+    "http://localhost:3000",
+    "https://app.example.com",
+  ],
+})
+
+export const { handler, getSession } = auth
+```
+
+## Related
+
+- [createAuth](/api/create-auth)
+- [SessionConfig](/api/session-config)
+- [OTPConfig](/api/otp-config)
+- [Database Adapter API](/api/database-adapter)
+- [Adapters Concept](/concepts/adapters)

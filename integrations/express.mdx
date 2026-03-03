@@ -1,0 +1,392 @@
+---
+title: Express.js Integration
+description: Integrate Arraf Auth with Express.js applications
+---
+
+Integrate Arraf Auth with your Express.js application using middleware.
+
+## Installation
+
+```bash
+npm install @arraf-auth/express
+```
+
+## Quick Start
+
+<Steps>
+
+### Configure Auth Instance
+
+Create your auth configuration:
+
+```typescript lib/auth.ts
+import { createAuth } from "@arraf-auth/core"
+
+export const auth = createAuth({
+  // Your auth configuration
+})
+```
+
+### Set Up Auth Routes
+
+Mount the auth handler at `/auth/*` endpoints:
+
+```typescript app.ts
+import express from "express"
+import { arrafAuth, sessionMiddleware } from "@arraf-auth/express"
+import { auth } from "./lib/auth"
+
+const app = express()
+
+app.use(express.json())
+
+// Mount auth routes at /auth/*
+app.use("/auth/*", arrafAuth({ auth }))
+
+// Add session middleware to all routes
+app.use(sessionMiddleware({ auth }))
+
+app.listen(3000, () => {
+  console.log("Server running on port 3000")
+})
+```
+
+### Access Session in Routes
+
+The session is available on `req.auth`:
+
+```typescript
+app.get("/profile", (req, res) => {
+  const auth = req.auth
+
+  if (!auth?.user) {
+    return res.status(401).json({ error: "Unauthorized" })
+  }
+
+  res.json({
+    user: auth.user,
+    session: auth.session,
+  })
+})
+```
+
+</Steps>
+
+## Middleware
+
+### Auth Handler
+
+The `arrafAuth` middleware handles all authentication requests:
+
+```typescript
+import { arrafAuth } from "@arraf-auth/express"
+import { auth } from "./lib/auth"
+
+app.use("/auth/*", arrafAuth({ auth }))
+```
+
+This automatically handles:
+- Login requests
+- Signup requests
+- Session management
+- Token refresh
+- Logout
+
+<Note>
+The auth handler converts Express requests to Web API `Request` objects internally and handles the response conversion automatically.
+</Note>
+
+### Session Middleware
+
+The `sessionMiddleware` loads session data into the request object:
+
+```typescript
+import { sessionMiddleware } from "@arraf-auth/express"
+import { auth } from "./lib/auth"
+
+app.use(sessionMiddleware({ auth }))
+```
+
+After this middleware runs, `req.auth` contains:
+- `user` - The authenticated user object
+- `session` - The session object
+
+If not authenticated, `req.auth` is `null`.
+
+### Require Auth Middleware
+
+Protect routes that require authentication:
+
+```typescript
+import { requireAuth } from "@arraf-auth/express"
+
+app.get("/dashboard", requireAuth(), (req, res) => {
+  // req.auth.user is guaranteed to exist here
+  res.json({ user: req.auth.user })
+})
+```
+
+Returns `401 Unauthorized` if the user is not authenticated.
+
+## Route Protection
+
+### Protect Single Routes
+
+```typescript
+import { requireAuth } from "@arraf-auth/express"
+
+app.get("/profile", requireAuth(), (req, res) => {
+  res.json({ user: req.auth.user })
+})
+
+app.post("/posts", requireAuth(), (req, res) => {
+  // Create post
+})
+```
+
+### Protect Route Groups
+
+Protect multiple routes with a router:
+
+```typescript
+import { Router } from "express"
+import { requireAuth } from "@arraf-auth/express"
+
+const protectedRouter = Router()
+
+// Apply auth to all routes in this router
+protectedRouter.use(requireAuth())
+
+protectedRouter.get("/dashboard", (req, res) => {
+  res.json({ user: req.auth.user })
+})
+
+protectedRouter.get("/settings", (req, res) => {
+  res.json({ user: req.auth.user })
+})
+
+app.use(protectedRouter)
+```
+
+### Custom Authorization
+
+Implement custom authorization logic:
+
+```typescript
+function requireRole(role: string) {
+  return (req, res, next) => {
+    if (!req.auth?.user) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    if (req.auth.user.role !== role) {
+      return res.status(403).json({ error: "Forbidden" })
+    }
+
+    next()
+  }
+}
+
+app.get("/admin", requireRole("admin"), (req, res) => {
+  res.json({ message: "Admin area" })
+})
+```
+
+## Complete Example
+
+```typescript app.ts
+import express from "express"
+import { arrafAuth, sessionMiddleware, requireAuth } from "@arraf-auth/express"
+import { auth } from "./lib/auth"
+
+const app = express()
+
+app.use(express.json())
+
+// Auth routes
+app.use("/auth/*", arrafAuth({ auth }))
+
+// Session middleware for all routes
+app.use(sessionMiddleware({ auth }))
+
+// Public routes
+app.get("/", (req, res) => {
+  res.json({ message: "Welcome" })
+})
+
+// Protected routes
+app.get("/profile", requireAuth(), (req, res) => {
+  res.json({
+    user: req.auth.user,
+  })
+})
+
+app.get("/dashboard", requireAuth(), (req, res) => {
+  res.json({
+    message: `Welcome ${req.auth.user.name}`,
+    user: req.auth.user,
+  })
+})
+
+app.post("/posts", requireAuth(), (req, res) => {
+  // Create post with req.auth.user.id
+  res.json({ success: true })
+})
+
+// Error handling
+app.use((err, req, res, next) => {
+  console.error(err)
+  res.status(500).json({ error: "Internal server error" })
+})
+
+app.listen(3000, () => {
+  console.log("Server running on http://localhost:3000")
+})
+```
+
+## TypeScript Support
+
+Extend Express types to include auth:
+
+```typescript types/express.d.ts
+import "express"
+
+declare module "express-serve-static-core" {
+  interface Request {
+    auth: {
+      user: {
+        id: string
+        email: string | null
+        phone: string | null
+        name: string | null
+      }
+      session: {
+        id: string
+        expiresAt: Date
+      }
+    } | null
+  }
+}
+```
+
+Now TypeScript knows about `req.auth`:
+
+```typescript
+app.get("/profile", requireAuth(), (req, res) => {
+  // TypeScript knows req.auth exists and has correct types
+  const userId = req.auth.user.id
+  const email = req.auth.user.email
+
+  res.json({ userId, email })
+})
+```
+
+## How It Works
+
+### Request Conversion
+
+The integration converts Express requests to Web API `Request` objects:
+
+```typescript
+function toWebRequest(req: express.Request): Request {
+  const protocol = req.protocol ?? "http"
+  const host = req.get("host") ?? "localhost"
+  const url = `${protocol}://${host}${req.originalUrl}`
+
+  return new Request(url, {
+    method: req.method,
+    headers: req.headers as HeadersInit,
+    body: req.method !== "GET" && req.method !== "HEAD"
+      ? JSON.stringify(req.body)
+      : undefined,
+  })
+}
+```
+
+### Response Conversion
+
+Web API `Response` objects are converted back to Express responses:
+
+```typescript
+async function sendWebResponse(
+  webRes: Response,
+  res: express.Response
+): Promise<void> {
+  res.status(webRes.status)
+
+  webRes.headers.forEach((value, key) => {
+    if (key.toLowerCase() === "set-cookie") {
+      res.append("Set-Cookie", value)
+    } else {
+      res.setHeader(key, value)
+    }
+  })
+
+  const body = await webRes.text()
+  res.send(body)
+}
+```
+
+## API Reference
+
+### arrafAuth(config)
+
+Creates Express middleware for handling auth requests.
+
+**Parameters:**
+- `config.auth` - Your auth instance
+
+**Returns:** Express `RequestHandler`
+
+### sessionMiddleware(config)
+
+Middleware that loads session into `req.auth`.
+
+**Parameters:**
+- `config.auth` - Your auth instance
+
+**Returns:** Express `RequestHandler`
+
+**Sets:**
+- `req.auth.user` - User object or `null`
+- `req.auth.session` - Session object or `null`
+
+### requireAuth()
+
+Middleware that requires authentication.
+
+**Returns:** Express `RequestHandler`
+
+**Behavior:**
+- Returns `401` if `req.auth.user` is not set
+- Calls `next()` if authenticated
+
+## Troubleshooting
+
+### req.auth is undefined
+
+Make sure you've added `sessionMiddleware` before your routes:
+
+```typescript
+app.use(sessionMiddleware({ auth }))
+
+// Then your routes
+app.get("/profile", requireAuth(), (req, res) => {
+  // ...
+})
+```
+
+### Cookies not being set
+
+Check that:
+- You're using `express.json()` middleware
+- Your auth handler is properly configured
+- Cookie settings match your environment (secure, domain, etc.)
+
+### TypeScript errors on req.auth
+
+Add the type declaration file shown in the TypeScript Support section.
+
+<Warning>
+Always place `sessionMiddleware` after the auth routes but before routes that need session access.
+</Warning>

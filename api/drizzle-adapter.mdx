@@ -1,0 +1,386 @@
+---
+title: Drizzle Adapter
+description: Official Drizzle ORM database adapter for Arraf Auth
+---
+
+The Drizzle adapter enables Arraf Auth to work with PostgreSQL databases using Drizzle ORM, providing type-safe database operations with excellent performance.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/adapter-drizzle drizzle-orm postgres
+npm install -D drizzle-kit
+```
+
+```bash pnpm
+pnpm add @arraf-auth/adapter-drizzle drizzle-orm postgres
+pnpm add -D drizzle-kit
+```
+
+```bash yarn
+yarn add @arraf-auth/adapter-drizzle drizzle-orm postgres
+yarn add -D drizzle-kit
+```
+</CodeGroup>
+
+## Setup
+
+### 1. Define Database Schema
+
+You can either use the pre-built schema from the adapter or define your own schema:
+
+<CodeGroup>
+```typescript Using Adapter Schema
+import { users, sessions, accounts, verifications } from "@arraf-auth/adapter-drizzle"
+
+// The adapter exports ready-to-use table definitions
+export { users, sessions, accounts, verifications }
+```
+
+```typescript Custom Schema
+import {
+  pgTable,
+  text,
+  boolean,
+  timestamp,
+  integer,
+  pgEnum,
+  uniqueIndex,
+  index,
+} from "drizzle-orm/pg-core"
+
+const createId = (): string => {
+  return crypto.randomUUID()
+}
+
+export const verificationTypeEnum = pgEnum("verification_type", [
+  "phone_otp",
+  "email_otp",
+  "email_verification",
+  "password_reset",
+  "phone_change",
+])
+
+export const users = pgTable("users", {
+  id: text("id").primaryKey().$defaultFn(createId),
+  email: text("email").unique(),
+  phone: text("phone").unique(),
+  name: text("name"),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  phoneVerified: boolean("phone_verified").notNull().default(false),
+  image: text("image"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+})
+
+export const sessions = pgTable("sessions", {
+  id: text("id").primaryKey().$defaultFn(createId),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  userIdx: index("sessions_user_idx").on(t.userId),
+  tokenIdx: index("sessions_token_idx").on(t.token),
+}))
+
+export const accounts = pgTable("accounts", {
+  id: text("id").primaryKey().$defaultFn(createId),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  providerId: text("provider_id").notNull(),
+  accountId: text("account_id").notNull(),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  accessTokenExpiresAt: timestamp("access_token_expires_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  providerAccountIdx: uniqueIndex("accounts_provider_account_idx").on(t.providerId, t.accountId),
+  userIdx: index("accounts_user_idx").on(t.userId),
+}))
+
+export const verifications = pgTable("verifications", {
+  id: text("id").primaryKey().$defaultFn(createId),
+  identifier: text("identifier").notNull(),
+  token: text("token").notNull(),
+  type: verificationTypeEnum("type").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  identifierTypeIdx: uniqueIndex("verifications_identifier_type_idx").on(t.identifier, t.type),
+  identifierIdx: index("verifications_identifier_idx").on(t.identifier),
+}))
+```
+</CodeGroup>
+
+<Note>
+  **Important Schema Requirements:**
+  - Use `text` type for IDs with `$defaultFn` for auto-generation
+  - `email` and `phone` must be nullable and unique
+  - Foreign keys should use `onDelete: "cascade"` for automatic cleanup
+  - The `verification_type` enum uses underscores instead of hyphens
+  - Add indexes on frequently queried fields (`userId`, `token`)
+</Note>
+
+### 2. Create Drizzle Config
+
+Create a `drizzle.config.ts` file in your project root:
+
+```typescript drizzle.config.ts
+import type { Config } from "drizzle-kit"
+
+export default {
+  schema: "./lib/db/schema.ts",
+  out: "./drizzle",
+  dialect: "postgresql",
+  dbCredentials: {
+    url: process.env.DATABASE_URL!,
+  },
+} satisfies Config
+```
+
+### 3. Generate and Run Migrations
+
+Generate migration files and apply them to your database:
+
+```bash
+# Generate migration
+npx drizzle-kit generate
+
+# Apply migrations
+npx drizzle-kit push
+```
+
+### 4. Create Database Connection
+
+Set up your Drizzle database connection:
+
+```typescript lib/db/index.ts
+import { drizzle } from "drizzle-orm/postgres-js"
+import postgres from "postgres"
+import * as schema from "./schema"
+
+const client = postgres(process.env.DATABASE_URL!)
+export const db = drizzle(client, { schema })
+```
+
+### 5. Configure Arraf Auth
+
+Use the Drizzle adapter in your Arraf Auth configuration:
+
+```typescript lib/auth.ts
+import { createAuth } from "@arraf-auth/core"
+import { drizzleAdapter } from "@arraf-auth/adapter-drizzle"
+import { db } from "./db"
+
+export const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: drizzleAdapter(db),
+  session: {
+    strategy: "database",
+    expiresIn: "7d",
+  },
+})
+```
+
+## Usage with Next.js
+
+<CodeGroup>
+```typescript app/api/auth/[...auth]/route.ts
+import { auth } from "@/lib/auth"
+
+export const { GET, POST } = auth.handler()
+```
+
+```typescript middleware.ts
+import { auth } from "@/lib/auth"
+
+export default auth.middleware()
+
+export const config = {
+  matcher: ["/dashboard/:path*", "/api/:path*"],
+}
+```
+</CodeGroup>
+
+## API Reference
+
+### drizzleAdapter
+
+Creates a database adapter for Drizzle ORM.
+
+<ParamField path="db" type="PostgresJsDatabase" required>
+  An instance of the Drizzle database client configured with postgres-js.
+</ParamField>
+
+<ResponseField name="adapter" type="DatabaseAdapter">
+  A database adapter that implements all required methods for Arraf Auth.
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { drizzle } from "drizzle-orm/postgres-js"
+import postgres from "postgres"
+import { drizzleAdapter } from "@arraf-auth/adapter-drizzle"
+
+const client = postgres(process.env.DATABASE_URL!)
+const db = drizzle(client)
+const adapter = drizzleAdapter(db)
+```
+
+## Exported Schema Types
+
+The adapter exports TypeScript types for all table records:
+
+```typescript
+import type {
+  UserRecord,
+  SessionRecord,
+  AccountRecord,
+  VerificationRecord,
+} from "@arraf-auth/adapter-drizzle"
+
+// Use in your application
+function processUser(user: UserRecord) {
+  // Type-safe user handling
+}
+```
+
+## Schema Field Mapping
+
+The adapter handles automatic conversion between Drizzle's enum format and Arraf Auth's type format:
+
+| Arraf Auth Type | Drizzle Enum |
+|-----------------|-------------|
+| `phone-otp` | `phone_otp` |
+| `email-otp` | `email_otp` |
+| `email-verification` | `email_verification` |
+| `password-reset` | `password_reset` |
+| `phone-change` | `phone_change` |
+
+<Note>
+  The adapter automatically converts between hyphenated and underscored formats using internal helper functions.
+</Note>
+
+## Advanced Usage
+
+### Custom ID Generation
+
+The default schema uses a simple ID generation function. For production, consider using a more robust solution:
+
+```typescript
+import { customAlphabet } from "nanoid"
+
+const createId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 21)
+
+export const users = pgTable("users", {
+  id: text("id").primaryKey().$defaultFn(createId),
+  // ... other fields
+})
+```
+
+### Connection Pooling
+
+For better performance in production, configure connection pooling:
+
+```typescript
+import postgres from "postgres"
+
+const client = postgres(process.env.DATABASE_URL!, {
+  max: 10, // Maximum pool size
+  idle_timeout: 20,
+  connect_timeout: 10,
+})
+```
+
+### Using with Neon or Supabase
+
+<CodeGroup>
+```typescript Neon
+import { neon } from "@neondatabase/serverless"
+import { drizzle } from "drizzle-orm/neon-http"
+
+const sql = neon(process.env.DATABASE_URL!)
+const db = drizzle(sql)
+```
+
+```typescript Supabase
+import { createClient } from "@supabase/supabase-js"
+import postgres from "postgres"
+import { drizzle } from "drizzle-orm/postgres-js"
+
+const client = postgres(process.env.DATABASE_URL!)
+const db = drizzle(client)
+```
+</CodeGroup>
+
+## Querying User Data
+
+You can use Drizzle's query API alongside the adapter:
+
+```typescript
+import { eq } from "drizzle-orm"
+import { db } from "@/lib/db"
+import { users, sessions } from "@arraf-auth/adapter-drizzle"
+
+// Find user with sessions
+const userWithSessions = await db.query.users.findFirst({
+  where: eq(users.id, userId),
+  with: {
+    sessions: true,
+  },
+})
+
+// Count active sessions
+const activeSessions = await db
+  .select()
+  .from(sessions)
+  .where(eq(sessions.userId, userId))
+```
+
+## Migration from Prisma
+
+If you're migrating from Prisma to Drizzle:
+
+1. Generate Drizzle schema from your Prisma database:
+   ```bash
+   npx drizzle-kit introspect
+   ```
+
+2. Compare the generated schema with the required Arraf Auth schema
+
+3. Update your auth configuration to use the Drizzle adapter
+
+## Troubleshooting
+
+### Error: relation does not exist
+
+Make sure you've run the migrations:
+```bash
+npx drizzle-kit push
+```
+
+### Error: enum type does not exist
+
+Ensure the `verification_type` enum is created in your database. Run:
+```bash
+npx drizzle-kit generate
+npx drizzle-kit push
+```
+
+### Type errors with database client
+
+Make sure you're using the correct Drizzle database type:
+```typescript
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js"
+```
+
+## Next Steps
+
+- Learn about the [DatabaseAdapter interface](/api/database-adapter)
+- Explore [session management](/core-concepts/sessions)
+- Set up [OAuth providers](/core-concepts/oauth)

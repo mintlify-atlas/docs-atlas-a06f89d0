@@ -1,80 +1,332 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get Arraf Auth up and running in your Next.js application in under 5 minutes
 ---
 
-## Get started in three steps
+# Quickstart Guide
 
-Get your documentation site running locally and make your first customization.
+Get a working authentication system with **phone OTP, email/password, and OAuth** in under 5 minutes. This guide uses Next.js with the App Router and Prisma.
 
-### Step 1: Set up your local environment
+<Steps>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+<Step title="Install Packages">
 
-### Step 2: Deploy your changes
+Install the core package, a database adapter, and the Next.js integration:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/core @arraf-auth/adapter-prisma @arraf-auth/nextjs
+```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+```bash yarn
+yarn add @arraf-auth/core @arraf-auth/adapter-prisma @arraf-auth/nextjs
+```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+```bash pnpm
+pnpm add @arraf-auth/core @arraf-auth/adapter-prisma @arraf-auth/nextjs
+```
+</CodeGroup>
 
-### Step 3: Go live
+<Info>
+  This guide uses Prisma. If you prefer Drizzle, install `@arraf-auth/adapter-drizzle` instead.
+</Info>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+</Step>
 
-## Next steps
+<Step title="Set Up Prisma (if not already configured)">
 
-Now that you have your docs running, explore these key features:
+If you haven't set up Prisma yet, initialize it:
+
+```bash
+npx prisma init
+```
+
+Add the Arraf Auth schema to your `schema.prisma`:
+
+```prisma
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  phone         String?   @unique
+  name          String?
+  emailVerified Boolean   @default(false)
+  phoneVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  sessions      Session[]
+  accounts      Account[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  
+  user      User     @rel(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                   String    @id @default(cuid())
+  userId               String
+  providerId           String
+  accountId            String
+  accessToken          String?
+  refreshToken         String?
+  accessTokenExpiresAt DateTime?
+  createdAt            DateTime  @default(now())
+  
+  user                 User      @rel(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([providerId, accountId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  token      String
+  type       String
+  expiresAt  DateTime
+  attempts   Int      @default(0)
+  createdAt  DateTime @default(now())
+  
+  @@unique([identifier, type])
+}
+```
+
+Then push the schema to your database:
+
+```bash
+npx prisma db push
+```
+
+</Step>
+
+<Step title="Create Prisma Client">
+
+Create a Prisma client instance at `lib/prisma.ts`:
+
+```typescript lib/prisma.ts
+import { PrismaClient } from "@prisma/client"
+
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient }
+
+export const prisma =
+  globalForPrisma.prisma ?? new PrismaClient()
+
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma
+}
+```
+
+</Step>
+
+<Step title="Configure Arraf Auth">
+
+Create your auth configuration at `lib/auth.ts`:
+
+```typescript lib/auth.ts
+import { createAuth } from "@arraf-auth/core"
+import { prismaAdapter } from "@arraf-auth/adapter-prisma"
+import { prisma } from "./prisma"
+
+export const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: prismaAdapter(prisma),
+  
+  // Session configuration
+  session: {
+    strategy: "database", // or "jwt"
+    cookieName: "arraf_session",
+  },
+  
+  // OTP configuration for phone authentication
+  otp: {
+    length: 6,
+    expiresIn: 300, // 5 minutes
+    maxAttempts: 5,
+  },
+  
+  // SMS provider for phone OTP
+  sms: {
+    send: async ({ to, message }) => {
+      // TODO: Integrate with your SMS provider
+      // Examples: Unifonic, Taqnyat, Msegat
+      console.log(`SMS to ${to}: ${message}`)
+      return { success: true }
+    },
+  },
+})
+```
+
+<Warning>
+  Make sure to set `AUTH_SECRET` in your `.env` file. Generate a secure random string:
+  ```bash
+  openssl rand -base64 32
+  ```
+</Warning>
+
+</Step>
+
+<Step title="Create API Route">
+
+Create a catch-all API route at `app/api/auth/[...all]/route.ts`:
+
+```typescript app/api/auth/[...all]/route.ts
+import { toNextHandlers } from "@arraf-auth/nextjs"
+import { auth } from "@/lib/auth"
+
+export const { GET, POST } = toNextHandlers(auth)
+```
+
+This exposes all authentication endpoints under `/api/auth/*`.
+
+</Step>
+
+<Step title="Use Phone OTP Authentication">
+
+Now you can authenticate users with their phone number. Here's a complete example:
+
+```typescript
+// 1. Send OTP to user's phone
+const sendResponse = await fetch('/api/auth/otp/send', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    method: 'phone',
+    phone: '0501234567' // Saudi phone number
+  })
+})
+
+// 2. User receives SMS with 6-digit code
+// 3. Verify the OTP code
+const verifyResponse = await fetch('/api/auth/otp/verify', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    method: 'phone',
+    phone: '0501234567',
+    otp: '123456' // Code from SMS
+  })
+})
+
+if (verifyResponse.ok) {
+  // User is now authenticated!
+  // Session cookie is automatically set
+}
+```
+
+</Step>
+
+<Step title="Get Current Session">
+
+Retrieve the authenticated user's session:
+
+```typescript
+import { getSession } from "@arraf-auth/nextjs"
+import { auth } from "@/lib/auth"
+
+export default async function Page() {
+  const session = await getSession(auth)
+  
+  if (!session) {
+    return <div>Not authenticated</div>
+  }
+  
+  return (
+    <div>
+      <h1>Welcome, {session.user.name}!</h1>
+      <p>Phone: {session.user.phone}</p>
+    </div>
+  )
+}
+```
+
+</Step>
+
+</Steps>
+
+## Available Authentication Flows
+
+Your authentication system now supports multiple flows:
+
+### Phone + OTP (Primary for Saudi Market)
+
+```typescript
+// Send OTP
+POST /api/auth/otp/send
+{
+  "method": "phone",
+  "phone": "0501234567"
+}
+
+// Verify OTP
+POST /api/auth/otp/verify
+{
+  "method": "phone",
+  "phone": "0501234567",
+  "otp": "123456"
+}
+```
+
+### Email + Password
+
+```typescript
+// Sign up
+POST /api/auth/sign-up
+{
+  "email": "user@example.com",
+  "password": "secure-password",
+  "name": "Ahmed"
+}
+
+// Sign in
+POST /api/auth/sign-in
+{
+  "method": "email",
+  "email": "user@example.com",
+  "password": "secure-password"
+}
+```
+
+### OAuth
+
+```typescript
+// Redirect to OAuth provider
+GET /api/auth/sign-in/google
+GET /api/auth/sign-in/github
+GET /api/auth/sign-in/twitter
+```
+
+<Info>
+  OAuth providers require additional configuration. See the [OAuth guide](/guides/oauth) for details.
+</Info>
+
+## Next Steps
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Phone + OTP Guide" icon="mobile-screen" href="/guides/phone-otp">
+    Deep dive into phone authentication with SMS providers
+  </Card>
+  
+  <Card title="Database Setup" icon="database" href="/guides/database-setup">
+    Configure Prisma or Drizzle for your database
+  </Card>
+  
+  <Card title="Session Management" icon="key" href="/guides/sessions">
+    Learn about JWT vs database sessions
+  </Card>
+  
+  <Card title="OAuth Providers" icon="shield" href="/guides/oauth">
+    Add Google, GitHub, or Twitter authentication
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+<Tip>
+  For production, replace the console.log SMS provider with a real SMS service like Unifonic, Taqnyat, or Msegat. See the [SMS Provider API reference](/api/sms-provider) for integration examples.
+</Tip>

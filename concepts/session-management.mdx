@@ -1,0 +1,393 @@
+---
+title: Session Management
+description: Understand how Arraf Auth manages user sessions with JWT and database strategies, including cookie configuration, expiration, and security
+---
+
+Arraf Auth provides flexible session management with support for both JWT and database-backed sessions. Sessions are created after successful authentication and used to identify authenticated users on subsequent requests.
+
+## Session Strategies
+
+Arraf Auth supports two session strategies: JWT and database. You can choose the strategy that best fits your application's requirements.
+
+<Tabs>
+  <Tab title="JWT Strategy">
+    JSON Web Tokens (JWT) store session data in a signed token, eliminating the need for database lookups on every request.
+    
+    **Configuration:**
+    ```typescript
+    export const auth = createAuth({
+      secret: process.env.AUTH_SECRET!,
+      database: adapter,
+      session: {
+        strategy: 'jwt',
+        expiresIn: '30d',
+        cookieName: 'auth_session',
+        cookieOptions: {
+          secure: true,
+          httpOnly: true,
+          sameSite: 'lax'
+        }
+      }
+    })
+    ```
+    
+    **How it works:**
+    1. After authentication, a session record is created in the database
+    2. A JWT is generated containing `userId`, `sessionId`, and `email` (see `packages/core/src/session.ts:28-29`)
+    3. The JWT is signed with your secret key and stored in a cookie
+    4. On subsequent requests, the JWT is verified and decoded
+    5. The session is validated against the database to ensure it hasn't been revoked
+    
+    **Advantages:**
+    - Faster: No database lookup to read session data
+    - Stateless: Token contains all necessary information
+    - Scalable: Works well with distributed systems
+    
+    **Considerations:**
+    - Sessions are still stored in the database for revocation support
+    - JWT verification happens on every request (`packages/core/src/session.ts:54-61`)
+  </Tab>
+  
+  <Tab title="Database Strategy">
+    Database sessions store a random token in a cookie and look up session data from the database on each request.
+    
+    **Configuration:**
+    ```typescript
+    export const auth = createAuth({
+      secret: process.env.AUTH_SECRET!,
+      database: adapter,
+      session: {
+        strategy: 'database',
+        expiresIn: '30d',
+        cookieName: 'auth_session',
+        cookieOptions: {
+          secure: true,
+          httpOnly: true,
+          sameSite: 'lax'
+        }
+      }
+    })
+    ```
+    
+    **How it works:**
+    1. After authentication, a session record is created with a random token
+    2. The random token is stored in a cookie (see `packages/core/src/session.ts:16-30`)
+    3. On subsequent requests, the token is used to look up the session in the database
+    4. Session expiration is checked against the `expiresAt` timestamp
+    
+    **Advantages:**
+    - Immediate revocation: Deleting the session from database logs user out instantly
+    - No secret key in JWT: Token is just a random identifier
+    - Full control: All session data stored server-side
+    
+    **Considerations:**
+    - Database query required on every authenticated request
+    - Ensure your database has proper indexing on the `token` field
+    
+    See `packages/core/src/session.ts:64-68` for database session lookup implementation.
+  </Tab>
+</Tabs>
+
+<Info>
+Both strategies create a session record in the database. The difference is whether the cookie contains a JWT (strategy: 'jwt') or a random token (strategy: 'database').
+</Info>
+
+## Session Configuration
+
+The `SessionConfig` interface provides options to customize session behavior:
+
+```typescript
+interface SessionConfig {
+  strategy?: 'jwt' | 'database'          // Default: 'database'
+  expiresIn?: string                      // Default: 30 days
+  cookieName?: string                     // Default: 'auth_session'
+  cookieOptions?: {
+    secure?: boolean                      // Default: true
+    sameSite?: 'strict' | 'lax' | 'none' // Default: 'lax'
+    httpOnly?: boolean                    // Default: true
+    domain?: string                       // Default: undefined
+  }
+}
+```
+
+See `packages/core/src/types.ts:84-94` for the complete interface definition.
+
+### Cookie Options
+
+<Accordion title="secure">
+  When `true`, the cookie is only sent over HTTPS connections. Always use `true` in production.
+  
+  ```typescript
+  session: {
+    cookieOptions: {
+      secure: process.env.NODE_ENV === 'production'
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="httpOnly">
+  When `true` (default), the cookie cannot be accessed via JavaScript, protecting against XSS attacks.
+  
+  ```typescript
+  session: {
+    cookieOptions: {
+      httpOnly: true // Recommended: always true
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="sameSite">
+  Controls when cookies are sent with cross-site requests:
+  
+  - `strict`: Cookie is never sent on cross-site requests
+  - `lax`: Cookie is sent on top-level navigation (default, recommended)
+  - `none`: Cookie is sent on all requests (requires `secure: true`)
+  
+  ```typescript
+  session: {
+    cookieOptions: {
+      sameSite: 'lax' // Balances security and usability
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="domain">
+  Specifies which domains can receive the cookie. Useful for sharing sessions across subdomains.
+  
+  ```typescript
+  session: {
+    cookieOptions: {
+      domain: '.example.com' // Shares cookie with all subdomains
+    }
+  }
+  ```
+</Accordion>
+
+## Session Lifecycle
+
+### Creating Sessions
+
+Sessions are automatically created after successful authentication in all flows (phone+OTP, email+password, OAuth). The `SessionManager.createSession()` method handles:
+
+1. Generating a secure random token
+2. Calculating expiration time (default: 30 days from now)
+3. Storing session metadata (IP address, user agent)
+4. Creating the session record in database
+5. Generating and signing the cookie value
+6. Serializing the cookie with appropriate options
+
+```typescript
+// Internal implementation (packages/core/src/session.ts:12-44)
+const { session, cookie } = await sessionManager.createSession(userId, req)
+
+// Session object
+{
+  id: 'session_123',
+  userId: 'user_456',
+  token: 'sess_abc...',
+  expiresAt: new Date('2026-04-03'),
+  ipAddress: '192.168.1.1',
+  userAgent: 'Mozilla/5.0...',
+  createdAt: new Date('2026-03-03')
+}
+```
+
+### Retrieving Sessions
+
+Retrieve the current user's session using the `SessionManager.getSession()` method:
+
+```typescript
+const result = await auth.sessionManager.getSession(req)
+
+if (result) {
+  const { user, session } = result
+  // User is authenticated
+} else {
+  // No valid session found
+}
+```
+
+The session retrieval process (`packages/core/src/session.ts:47-69`):
+
+1. Extracts the cookie from request headers
+2. For JWT strategy: Verifies and decodes the JWT
+3. For database strategy: Uses the token directly
+4. Looks up the session in the database
+5. Checks if the session has expired
+6. Fetches the associated user record
+7. Returns both user and session, or `null` if invalid
+
+<Note>
+Even with JWT strategy, the session is still validated against the database to support session revocation.
+</Note>
+
+### Revoking Sessions
+
+Delete a session to log out a user:
+
+```typescript
+const cookie = await auth.sessionManager.deleteSession(req)
+
+// Return the cookie to clear it in the browser
+return new Response(null, {
+  headers: { 'Set-Cookie': cookie }
+})
+```
+
+See `packages/core/src/session.ts:71-80` for the implementation.
+
+#### Revoking All User Sessions
+
+Revoke all sessions for a specific user (useful for security events):
+
+```typescript
+await auth.adapter.deleteUserSessions(userId)
+```
+
+This is particularly useful when:
+- User changes their password
+- Suspicious activity is detected
+- User explicitly requests to log out from all devices
+
+## Session Schema
+
+The `Session` interface defines the structure of session records:
+
+```typescript
+interface Session {
+  id: string                  // Unique session identifier
+  userId: string              // Associated user ID
+  token: string               // Session token (used as cookie value in database strategy)
+  expiresAt: Date             // When the session expires
+  ipAddress?: string          // IP address of the client
+  userAgent?: string          // Browser/client information
+  createdAt: Date             // When the session was created
+}
+```
+
+See `packages/core/src/types.ts:13-21` for the complete interface.
+
+## Security Best Practices
+
+<Warning>
+**Critical Security Settings:**
+
+1. Always set `secure: true` in production (requires HTTPS)
+2. Keep `httpOnly: true` to prevent XSS attacks
+3. Use `sameSite: 'lax'` or `'strict'` to prevent CSRF attacks
+4. Use a strong, random `secret` key (minimum 32 characters)
+5. Rotate session tokens after privilege escalation
+</Warning>
+
+### Secure Secret Management
+
+```typescript
+// ❌ Bad: Hardcoded secret
+const auth = createAuth({
+  secret: 'my-secret-key'
+})
+
+// ✅ Good: Environment variable
+const auth = createAuth({
+  secret: process.env.AUTH_SECRET!
+})
+```
+
+Generate a strong secret:
+
+```bash
+openssl rand -base64 32
+```
+
+### Session Expiration
+
+Sessions automatically expire based on the `expiresIn` configuration. The default is 30 days. Currently, this is hard-coded in `packages/core/src/session.ts:82-85`, but can be customized in future versions.
+
+```typescript
+// Expire sessions after 7 days
+session: {
+  expiresIn: '7d'
+}
+
+// Expire sessions after 12 hours
+session: {
+  expiresIn: '12h'
+}
+```
+
+### IP and User Agent Tracking
+
+Sessions automatically capture IP address and user agent for security monitoring:
+
+```typescript
+// Stored automatically (packages/core/src/session.ts:22-24)
+{
+  ipAddress: '192.168.1.1',
+  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)...'
+}
+```
+
+Use this data to:
+- Detect suspicious login locations
+- Identify unauthorized access
+- Display active sessions to users
+
+## Middleware Integration
+
+Use sessions in your middleware to protect routes:
+
+<Tabs>
+  <Tab title="Next.js">
+    ```typescript
+    import { NextResponse } from 'next/server'
+    import type { NextRequest } from 'next/server'
+    import { auth } from './lib/auth'
+    
+    export async function middleware(request: NextRequest) {
+      const session = await auth.sessionManager.getSession(request)
+      
+      if (!session) {
+        return NextResponse.redirect(new URL('/login', request.url))
+      }
+      
+      return NextResponse.next()
+    }
+    
+    export const config = {
+      matcher: ['/dashboard/:path*', '/profile/:path*']
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Express">
+    ```typescript
+    import { auth } from './lib/auth'
+    
+    app.use(async (req, res, next) => {
+      const session = await auth.sessionManager.getSession(req)
+      
+      if (!session) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+      
+      req.user = session.user
+      req.session = session.session
+      next()
+    })
+    ```
+  </Tab>
+</Tabs>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication Flows" icon="flow" href="/concepts/authentication-flows">
+    Learn about phone+OTP, email+password, and OAuth flows
+  </Card>
+  <Card title="Database Adapters" icon="database" href="/concepts/adapters">
+    Understand how sessions are stored in your database
+  </Card>
+</CardGroup>

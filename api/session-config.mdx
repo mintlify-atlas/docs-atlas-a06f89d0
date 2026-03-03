@@ -1,0 +1,203 @@
+---
+title: SessionConfig
+description: Configure session behavior and cookie settings
+---
+
+## Overview
+
+The `SessionConfig` interface defines how sessions are created, stored, and managed in Arraf Auth.
+
+```typescript
+interface SessionConfig {
+  strategy?: "jwt" | "database"
+  expiresIn?: string
+  cookieName?: string
+  cookieOptions?: {
+    secure?: boolean
+    sameSite?: "strict" | "lax" | "none"
+    httpOnly?: boolean
+    domain?: string
+  }
+}
+```
+
+## Fields
+
+<ParamField path="strategy" type="'jwt' | 'database'" default="jwt">
+  The session storage strategy.
+
+  - `"jwt"`: Sessions are stored as signed JWT tokens in cookies. Faster and stateless, but cannot be invalidated server-side until expiration.
+  - `"database"`: Sessions are stored in the database with a session token in the cookie. Can be invalidated immediately but requires database queries.
+
+  ```typescript
+  strategy: "database" // Recommended for most applications
+  ```
+
+  <Tip>
+    Use `"database"` strategy when you need the ability to revoke sessions immediately (e.g., for security features like "sign out all devices").
+  </Tip>
+</ParamField>
+
+<ParamField path="expiresIn" type="string" default="7d">
+  Session expiration time as a human-readable string. Supports units: `s` (seconds), `m` (minutes), `h` (hours), `d` (days).
+
+  ```typescript
+  expiresIn: "30d"  // 30 days
+  expiresIn: "12h"  // 12 hours
+  expiresIn: "90m"  // 90 minutes
+  ```
+
+  <Info>
+    Sessions are automatically renewed on each request, extending the expiration time.
+  </Info>
+</ParamField>
+
+<ParamField path="cookieName" type="string" default="auth_token">
+  The name of the cookie used to store the session token.
+
+  ```typescript
+  cookieName: "my_app_session"
+  ```
+
+  <Note>
+    Change this if you have multiple Arraf Auth instances on the same domain to avoid conflicts.
+  </Note>
+</ParamField>
+
+<ParamField path="cookieOptions" type="object">
+  Additional cookie configuration options for security and cross-domain support.
+
+  <ParamField path="cookieOptions.secure" type="boolean" default="true">
+    When `true`, the cookie is only sent over HTTPS connections. Automatically set to `false` for localhost.
+
+    ```typescript
+    secure: process.env.NODE_ENV === "production"
+    ```
+  </ParamField>
+
+  <ParamField path="cookieOptions.sameSite" type="'strict' | 'lax' | 'none'" default="lax">
+    Controls when cookies are sent in cross-site requests.
+
+    - `"strict"`: Cookie is never sent in cross-site requests. Most secure but may break OAuth flows.
+    - `"lax"`: Cookie is sent on top-level navigation (recommended for most apps).
+    - `"none"`: Cookie is always sent. Requires `secure: true`.
+
+    ```typescript
+    sameSite: "lax"
+    ```
+  </ParamField>
+
+  <ParamField path="cookieOptions.httpOnly" type="boolean" default="true">
+    When `true`, the cookie is inaccessible to JavaScript's `document.cookie` API. Protects against XSS attacks.
+
+    ```typescript
+    httpOnly: true // Highly recommended
+    ```
+
+    <Warning>
+      Setting `httpOnly: false` makes your sessions vulnerable to XSS attacks. Only disable if absolutely necessary.
+    </Warning>
+  </ParamField>
+
+  <ParamField path="cookieOptions.domain" type="string">
+    The domain where the cookie is valid. Useful for sharing sessions across subdomains.
+
+    ```typescript
+    domain: ".example.com" // Valid for example.com and all subdomains
+    ```
+
+    <Info>
+      Omit this field to restrict cookies to the current domain only.
+    </Info>
+  </ParamField>
+</ParamField>
+
+## Default Configuration
+
+If no `SessionConfig` is provided, Arraf Auth uses these defaults:
+
+```typescript
+{
+  strategy: "jwt",
+  expiresIn: "7d",
+  cookieName: "auth_token",
+  cookieOptions: {
+    secure: true,
+    sameSite: "lax",
+    httpOnly: true,
+  }
+}
+```
+
+## Usage Examples
+
+### Database Strategy with Long Expiration
+
+```typescript
+import { createAuth } from "@arraf-auth/core"
+
+const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: adapter,
+  session: {
+    strategy: "database",
+    expiresIn: "90d",
+    cookieName: "session",
+  },
+})
+```
+
+### Cross-Subdomain Sessions
+
+```typescript
+const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: adapter,
+  session: {
+    strategy: "database",
+    expiresIn: "30d",
+    cookieOptions: {
+      domain: ".myapp.com", // Share between app.myapp.com and admin.myapp.com
+      secure: true,
+      sameSite: "lax",
+    },
+  },
+})
+```
+
+### Development Configuration
+
+```typescript
+const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: adapter,
+  session: {
+    strategy: "jwt",
+    expiresIn: "1d",
+    cookieOptions: {
+      secure: false, // Allow HTTP in development
+      sameSite: "lax",
+    },
+  },
+})
+```
+
+## Security Best Practices
+
+<Note>
+  **Recommended production settings:**
+  - Use `strategy: "database"` for immediate session revocation
+  - Set `secure: true` to enforce HTTPS
+  - Keep `httpOnly: true` to prevent XSS attacks
+  - Use `sameSite: "lax"` for most applications
+</Note>
+
+<Tip>
+  For mobile apps or API-only backends, consider using JWT strategy with shorter expiration times and refresh token rotation.
+</Tip>
+
+## Related
+
+- [AuthConfig](/api/auth-config)
+- [createAuth](/api/create-auth)
+- [Session Management Concept](/concepts/session-management)

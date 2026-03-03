@@ -1,0 +1,235 @@
+---
+title: OTP Utilities
+description: Utility functions for generating, sending, and verifying one-time passwords
+---
+
+# OTP Utilities
+
+Utility functions for handling one-time password (OTP) generation, delivery, and verification with built-in security features.
+
+## generateOTP
+
+Generates a cryptographically secure numeric OTP code.
+
+```typescript
+function generateOTP(length: number = 6): string
+```
+
+### Parameters
+
+<ParamField path="length" type="number" default={6}>
+  The length of the OTP code to generate. Defaults to 6 digits.
+</ParamField>
+
+### Returns
+
+Returns a string containing the numeric OTP code of the specified length.
+
+### Examples
+
+```typescript
+// Generate default 6-digit OTP
+const otp1 = generateOTP()
+// "742816"
+
+// Generate 4-digit OTP
+const otp2 = generateOTP(4)
+// "9273"
+
+// Generate 8-digit OTP
+const otp3 = generateOTP(8)
+// "51829374"
+```
+
+<Note>
+  Uses `crypto.getRandomValues()` for cryptographically secure random number generation, ensuring OTP codes cannot be predicted.
+</Note>
+
+## sendOTP
+
+Generates and sends an OTP code via SMS, storing the verification record in the database.
+
+```typescript
+async function sendOTP(params: {
+  identifier: string
+  type: VerificationType
+  adapter: DatabaseAdapter
+  smsProvider?: SMSProvider
+  config?: OTPConfig
+  appName?: string
+}): Promise<{ success: boolean; error?: string }>
+```
+
+### Parameters
+
+<ParamField path="identifier" type="string" required>
+  The phone number or email to send the OTP to
+</ParamField>
+
+<ParamField path="type" type="VerificationType" required>
+  The type of verification: "phone-otp" or "email-otp"
+</ParamField>
+
+<ParamField path="adapter" type="DatabaseAdapter" required>
+  Database adapter for storing verification records
+</ParamField>
+
+<ParamField path="smsProvider" type="SMSProvider">
+  SMS provider instance for sending SMS. Required when type is "phone-otp".
+</ParamField>
+
+<ParamField path="config" type="OTPConfig">
+  Optional configuration for OTP length, expiration, and message template
+</ParamField>
+
+<ParamField path="appName" type="string">
+  Application name to include in the OTP message
+</ParamField>
+
+### Returns
+
+<ResponseField name="success" type="boolean" required>
+  Whether the OTP was sent successfully
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message if sending failed
+</ResponseField>
+
+### Behavior
+
+- Generates a new OTP using `generateOTP()`
+- Sets expiration time (default 5 minutes / 300 seconds)
+- Deletes any existing verification for the identifier
+- Creates new verification record with OTP and expiration
+- Sends SMS if type is "phone-otp" and SMS provider is configured
+- Initializes attempt counter at 0
+
+### Examples
+
+```typescript
+import { sendOTP } from "@arraf-auth/core"
+
+// Send OTP via SMS
+const result = await sendOTP({
+  identifier: "+966512345678",
+  type: "phone-otp",
+  adapter: dbAdapter,
+  smsProvider: twilioProvider,
+  config: {
+    length: 6,
+    expiresIn: 300, // 5 minutes
+  },
+  appName: "My App"
+})
+
+if (result.success) {
+  console.log("OTP sent successfully")
+} else {
+  console.error("Failed to send OTP:", result.error)
+}
+```
+
+<Note>
+  The function automatically deletes any existing OTP for the identifier before creating a new one, preventing multiple active OTPs for the same user.
+</Note>
+
+## verifyOTP
+
+Verifies an OTP code against the stored verification record with rate limiting.
+
+```typescript
+async function verifyOTP(params: {
+  identifier: string
+  otp: string
+  type: VerificationType
+  adapter: DatabaseAdapter
+  maxAttempts?: number
+}): Promise<{ valid: boolean; error?: string }>
+```
+
+### Parameters
+
+<ParamField path="identifier" type="string" required>
+  The phone number or email the OTP was sent to
+</ParamField>
+
+<ParamField path="otp" type="string" required>
+  The OTP code to verify
+</ParamField>
+
+<ParamField path="type" type="VerificationType" required>
+  The type of verification: "phone-otp" or "email-otp"
+</ParamField>
+
+<ParamField path="adapter" type="DatabaseAdapter" required>
+  Database adapter for retrieving verification records
+</ParamField>
+
+<ParamField path="maxAttempts" type="number" default={5}>
+  Maximum number of verification attempts allowed. Defaults to 5.
+</ParamField>
+
+### Returns
+
+<ResponseField name="valid" type="boolean" required>
+  Whether the OTP is valid and verification succeeded
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message if verification failed, with details about the failure reason
+</ResponseField>
+
+### Behavior
+
+- Retrieves verification record from database
+- Checks if OTP exists, is not expired, and attempts not exceeded
+- Increments attempt counter on invalid OTP
+- Deletes verification record on success or when max attempts reached
+- Provides user-friendly error messages with remaining attempts
+
+### Error Cases
+
+- **No OTP found**: "No OTP found. Please request a new one."
+- **Expired**: "OTP expired. Please request a new one."
+- **Max attempts**: "Too many attempts. Please request a new OTP."
+- **Invalid OTP**: "Invalid OTP. X attempts remaining."
+
+### Examples
+
+```typescript
+import { verifyOTP } from "@arraf-auth/core"
+
+// Verify OTP
+const result = await verifyOTP({
+  identifier: "+966512345678",
+  otp: "742816",
+  type: "phone-otp",
+  adapter: dbAdapter,
+  maxAttempts: 5
+})
+
+if (result.valid) {
+  console.log("OTP verified successfully")
+  // Proceed with authentication
+} else {
+  console.error("Verification failed:", result.error)
+  // Display error to user
+}
+```
+
+<Note>
+  The function includes automatic rate limiting by tracking attempts and locking out users after too many failed attempts. The verification record is automatically deleted after successful verification or when max attempts are exceeded.
+</Note>
+
+## Default OTP Message
+
+The default OTP message template (bilingual Arabic/English):
+
+```
+رمز التحقق الخاص بك هو: {OTP}
+Your verification code is: {OTP}
+Valid for 5 minutes. Do not share it.
+```
+
+You can customize this message by providing a `messageTemplate` function in the `OTPConfig`.

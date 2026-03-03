@@ -1,0 +1,300 @@
+---
+title: Authentication Flows
+description: Learn about the authentication methods supported by Arraf Auth, including phone+OTP, email+password, and OAuth providers
+---
+
+Arraf Auth supports multiple authentication flows to meet different use cases. Each flow is designed with security and user experience in mind.
+
+## Phone + OTP (Primary for Saudi Arabia)
+
+Phone-based authentication with one-time passwords (OTP) is the primary authentication method for Saudi Arabian users. This flow provides a passwordless experience while maintaining security.
+
+<Steps>
+  <Step title="Request OTP">
+    User submits their phone number to receive an OTP code.
+    
+    **Request:**
+    ```json
+    POST /api/auth/otp/send
+    {
+      "method": "phone",
+      "phone": "+966512345678"
+    }
+    ```
+    
+    **Response:**
+    ```json
+    {
+      "success": true,
+      "message": "OTP sent to phone",
+      "maskedPhone": "+9665****5678"
+    }
+    ```
+    
+    The phone number is automatically normalized to E.164 format and validated. The OTP is generated (6 digits by default) and sent via your configured SMS provider.
+  </Step>
+  
+  <Step title="Verify OTP">
+    User submits the OTP code they received to complete authentication.
+    
+    **Request:**
+    ```json
+    POST /api/auth/otp/verify
+    {
+      "method": "phone",
+      "phone": "+966512345678",
+      "otp": "123456",
+      "name": "Ahmed Al-Mansour" // optional, for new users
+    }
+    ```
+    
+    **Response:**
+    ```json
+    {
+      "user": {
+        "id": "user_123",
+        "phone": "+966512345678",
+        "name": "Ahmed Al-Mansour",
+        "email": null
+      },
+      "session": {
+        "id": "session_456",
+        "userId": "user_123",
+        "token": "sess_abc...",
+        "expiresAt": "2026-04-03T12:00:00Z"
+      },
+      "isNewUser": true
+    }
+    ```
+    
+    A secure session cookie is automatically set in the response headers.
+  </Step>
+</Steps>
+
+<Info>
+The OTP flow automatically creates a new user account if the phone number doesn't exist. The `phoneVerified` field is set to `true` upon successful verification.
+</Info>
+
+### OTP Configuration
+
+You can customize OTP behavior in your auth configuration:
+
+```typescript
+export const auth = createAuth({
+  // ... other config
+  otp: {
+    length: 6,              // Length of OTP code (default: 6)
+    expiresIn: 300,         // Expiration time in seconds (default: 300 = 5 min)
+    maxAttempts: 5,         // Maximum verification attempts (default: 5)
+    messageTemplate: (otp, appName) => 
+      `Your ${appName} verification code is: ${otp}. Valid for 5 minutes.`
+  },
+  sms: twilioProvider({    // Your SMS provider
+    accountSid: process.env.TWILIO_ACCOUNT_SID,
+    authToken: process.env.TWILIO_AUTH_TOKEN,
+    fromNumber: process.env.TWILIO_PHONE_NUMBER
+  })
+})
+```
+
+See `packages/core/src/routes/otp-send.ts:39-45` and `packages/core/src/routes/otp-verify.ts:44-50` for implementation details.
+
+## Email + Password
+
+Traditional credential-based authentication with email and password.
+
+<Tabs>
+  <Tab title="Sign Up">
+    Create a new account with email and password.
+    
+    **Request:**
+    ```json
+    POST /api/auth/sign-up
+    {
+      "email": "user@example.com",
+      "password": "securePassword123",
+      "name": "John Smith" // optional
+    }
+    ```
+    
+    **Response:**
+    ```json
+    {
+      "user": {
+        "id": "user_123",
+        "email": "user@example.com",
+        "name": "John Smith",
+        "phone": null
+      },
+      "session": {
+        "id": "session_456",
+        "userId": "user_123",
+        "token": "sess_abc...",
+        "expiresAt": "2026-04-03T12:00:00Z"
+      }
+    }
+    ```
+    
+    Passwords are hashed using bcrypt before storage. The minimum password length is 8 characters.
+    
+    See `packages/core/src/routes/sign-up.ts:52-60` for password hashing implementation.
+  </Tab>
+  
+  <Tab title="Sign In">
+    Authenticate with existing credentials.
+    
+    **Request:**
+    ```json
+    POST /api/auth/sign-in
+    {
+      "method": "email",
+      "email": "user@example.com",
+      "password": "securePassword123"
+    }
+    ```
+    
+    **Response:**
+    ```json
+    {
+      "user": {
+        "id": "user_123",
+        "email": "user@example.com",
+        "phone": null
+      },
+      "session": {
+        "id": "session_456",
+        "userId": "user_123",
+        "token": "sess_abc...",
+        "expiresAt": "2026-04-03T12:00:00Z"
+      }
+    }
+    ```
+    
+    See `packages/core/src/routes/sign-in.ts:38-51` for credential verification logic.
+  </Tab>
+</Tabs>
+
+<Warning>
+Always use HTTPS in production to protect credentials during transmission. Password verification is performed using constant-time comparison to prevent timing attacks.
+</Warning>
+
+## OAuth Providers
+
+Arraf Auth supports OAuth 2.0 authentication with external providers like Google, GitHub, and custom providers.
+
+<Steps>
+  <Step title="Initiate OAuth Flow">
+    Redirect user to the OAuth provider's authorization page.
+    
+    **Request:**
+    ```
+    GET /api/auth/oauth/google
+    ```
+    
+    This endpoint:
+    - Generates a random state parameter for CSRF protection
+    - Generates PKCE code verifier and challenge (for enhanced security)
+    - Stores state and verifier in secure HTTP-only cookies
+    - Redirects user to provider's authorization URL
+    
+    See `packages/core/src/routes/oauth-start.ts:18-36` for state and PKCE generation.
+  </Step>
+  
+  <Step title="Provider Authorization">
+    User authorizes your application on the provider's page and is redirected back to your callback URL.
+  </Step>
+  
+  <Step title="Handle Callback">
+    The callback route processes the authorization code and creates a session.
+    
+    **Callback URL:**
+    ```
+    GET /api/auth/oauth/google/callback?code=abc123&state=xyz789
+    ```
+    
+    The callback handler:
+    1. Validates the state parameter to prevent CSRF attacks (`packages/core/src/routes/oauth-callback.ts:40-46`)
+    2. Exchanges the authorization code for access tokens (`packages/core/src/routes/oauth-callback.ts:48-53`)
+    3. Fetches the user's profile from the provider (`packages/core/src/routes/oauth-callback.ts:55-60`)
+    4. Creates or finds existing user by email (`packages/core/src/routes/oauth-callback.ts:66-85`)
+    5. Links the OAuth account to the user (`packages/core/src/routes/oauth-callback.ts:87-103`)
+    6. Creates a session and sets the cookie (`packages/core/src/routes/oauth-callback.ts:109-116`)
+    7. Redirects to the application
+  </Step>
+</Steps>
+
+### Configuring OAuth Providers
+
+```typescript
+import { createAuth } from '@arraf-auth/core'
+import { GoogleProvider } from '@arraf-auth/google'
+import { GitHubProvider } from '@arraf-auth/github'
+
+export const auth = createAuth({
+  // ... other config
+  providers: [
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
+    GitHubProvider({
+      clientId: process.env.GITHUB_CLIENT_ID!,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+    }),
+  ]
+})
+```
+
+<Note>
+OAuth providers must implement the `OAuthProvider` interface defined in `packages/core/src/types.ts:118-127`, which includes methods for getting authorization URLs, exchanging codes, and fetching user profiles.
+</Note>
+
+## Flow Comparison
+
+| Feature | Phone + OTP | Email + Password | OAuth |
+|---------|-------------|------------------|-------|
+| **Passwordless** | Yes | No | Yes |
+| **Saudi Arabia Optimized** | Yes | No | No |
+| **Auto Sign-up** | Yes | No | Yes |
+| **Verification Required** | Yes (phone) | Optional (email) | Provider-dependent |
+| **Security** | High (time-limited OTP) | High (bcrypt hashed) | High (provider-managed) |
+| **User Experience** | Fast | Traditional | Convenient |
+
+## Plugin Hooks
+
+All authentication flows support plugin hooks for custom logic:
+
+```typescript
+{
+  hooks: {
+    beforeSignIn: async (user) => {
+      // Custom logic before sign in (all flows)
+    },
+    afterSignIn: async (user, session) => {
+      // Custom logic after successful sign in (all flows)
+    },
+    beforeSignUp: async (data) => {
+      // Validate or modify user data before account creation
+    },
+    afterSignUp: async (user) => {
+      // Send welcome email, analytics, etc.
+    },
+    afterOTPVerified: async (user, type) => {
+      // Custom logic after OTP verification (phone/email OTP only)
+    }
+  }
+}
+```
+
+Learn more about plugins in the [Plugin System](/concepts/plugins) documentation.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Session Management" icon="clock" href="/concepts/session-management">
+    Learn how sessions are created, stored, and validated
+  </Card>
+  <Card title="Plugin System" icon="plug" href="/concepts/plugins">
+    Extend authentication flows with custom logic
+  </Card>
+</CardGroup>

@@ -1,0 +1,89 @@
+---
+title: Account
+description: The Account type represents an OAuth provider account linked to a user
+---
+
+## Account Interface
+
+The `Account` interface represents a linked OAuth provider account. Users can have multiple accounts linked to their profile (e.g., Google, GitHub, Facebook).
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the account record
+</ResponseField>
+
+<ResponseField name="userId" type="string" required>
+  The ID of the user this account is linked to. References `User.id`.
+</ResponseField>
+
+<ResponseField name="providerId" type="string" required>
+  The OAuth provider identifier (e.g., "google", "github", "facebook")
+</ResponseField>
+
+<ResponseField name="accountId" type="string" required>
+  The unique account identifier from the OAuth provider. This is the user's ID in the provider's system.
+</ResponseField>
+
+<ResponseField name="accessToken" type="string" optional>
+  The OAuth access token for this account. Used to make API requests to the provider on behalf of the user.
+</ResponseField>
+
+<ResponseField name="refreshToken" type="string" optional>
+  The OAuth refresh token. Used to obtain new access tokens when they expire.
+</ResponseField>
+
+<ResponseField name="accessTokenExpiresAt" type="Date" optional>
+  Timestamp when the access token expires. Used to determine when to refresh the token.
+</ResponseField>
+
+<ResponseField name="createdAt" type="Date" required>
+  Timestamp when the account was linked
+</ResponseField>
+
+## OAuth Account Linking
+
+Accounts are automatically created when users sign in with OAuth providers. Arraf Auth supports linking multiple OAuth providers to a single user account.
+
+### How Account Linking Works
+
+1. **First Sign-In**: When a user signs in with an OAuth provider for the first time, Arraf Auth creates both a `User` and an `Account` record.
+
+2. **Matching Existing Users**: If a user with the same verified email already exists, the new OAuth account is linked to the existing user.
+
+3. **Multiple Providers**: Users can link multiple OAuth providers (Google, GitHub, etc.) to the same account for flexible authentication.
+
+## Usage Example
+
+```typescript
+import { Account } from "arraf-auth"
+
+// Get all linked accounts for a user
+const accounts: Account[] = await auth.getAccountsByUserId("user_123")
+
+console.log("Linked providers:", accounts.map(a => a.providerId))
+// ["google", "github"]
+
+// Find specific account
+const googleAccount = await auth.getAccount("google", "google_user_id_123")
+
+if (googleAccount) {
+  console.log("Access token:", googleAccount.accessToken)
+  console.log("Expires at:", googleAccount.accessTokenExpiresAt)
+}
+
+// Use access token to call provider API
+if (googleAccount?.accessToken) {
+  const response = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+    headers: {
+      Authorization: `Bearer ${googleAccount.accessToken}`
+    }
+  })
+}
+```
+
+<Note>
+  Access tokens and refresh tokens are sensitive credentials. Ensure your database is properly secured and consider encrypting these fields.
+</Note>
+
+<Info>
+  Account linking is automatic when users sign in with OAuth providers. If a user signs in with Google and later with GitHub using the same email, both accounts will be linked to the same User record.
+</Info>

@@ -1,0 +1,485 @@
+---
+title: Hono Integration
+description: Integrate Arraf Auth with Hono web framework
+---
+
+Integrate Arraf Auth with your Hono application using middleware and context.
+
+## Installation
+
+```bash
+npm install @arraf-auth/hono
+```
+
+## Quick Start
+
+<Steps>
+
+### Configure Auth Instance
+
+Create your auth configuration:
+
+```typescript lib/auth.ts
+import { createAuth } from "@arraf-auth/core"
+
+export const auth = createAuth({
+  // Your auth configuration
+})
+```
+
+### Set Up Auth Routes
+
+Mount the auth handler and add session middleware:
+
+```typescript app.ts
+import { Hono } from "hono"
+import { arrafAuth, sessionMiddleware } from "@arraf-auth/hono"
+import type { AuthVariables } from "@arraf-auth/hono"
+import { auth } from "./lib/auth"
+
+type Variables = AuthVariables
+
+const app = new Hono<{ Variables: Variables }>()
+
+// Mount auth routes at /auth/*
+app.route("/auth", arrafAuth({ auth }))
+
+// Add session middleware
+app.use("*", sessionMiddleware({ auth }))
+
+app.get("/", (c) => {
+  return c.text("Hello Hono!")
+})
+
+export default app
+```
+
+### Access Session in Routes
+
+Access user and session from context:
+
+```typescript
+app.get("/profile", (c) => {
+  const user = c.get("user")
+  const session = c.get("session")
+
+  if (!user) {
+    return c.json({ error: "Unauthorized" }, 401)
+  }
+
+  return c.json({ user, session })
+})
+```
+
+</Steps>
+
+## Middleware
+
+### Auth Handler
+
+The `arrafAuth` function creates a Hono app that handles all authentication requests:
+
+```typescript
+import { arrafAuth } from "@arraf-auth/hono"
+import { auth } from "./lib/auth"
+
+const authApp = arrafAuth({ auth })
+app.route("/auth", authApp)
+```
+
+Optionally specify a custom base path:
+
+```typescript
+const authApp = arrafAuth({
+  auth,
+  basePath: "/api/auth",
+})
+```
+
+This handles:
+- Login requests
+- Signup requests
+- Session management
+- Token refresh
+- Logout
+
+<Note>
+The auth handler uses `c.req.raw` to access the native Web API `Request` object.
+</Note>
+
+### Session Middleware
+
+The `sessionMiddleware` loads session data into Hono context:
+
+```typescript
+import { sessionMiddleware } from "@arraf-auth/hono"
+import { auth } from "./lib/auth"
+
+app.use("*", sessionMiddleware({ auth }))
+```
+
+This middleware sets:
+- `c.get("user")` - The authenticated user object (or `null`)
+- `c.get("session")` - The session object (or `null`)
+
+### Require Auth Middleware
+
+Protect routes that require authentication:
+
+```typescript
+import { requireAuth } from "@arraf-auth/hono"
+
+app.get("/dashboard", requireAuth(), (c) => {
+  const user = c.get("user")
+  // user is guaranteed to exist here
+  return c.json({ user })
+})
+```
+
+Returns `401 Unauthorized` if the user is not authenticated.
+
+## Route Protection
+
+### Protect Single Routes
+
+```typescript
+import { requireAuth } from "@arraf-auth/hono"
+
+app.get("/profile", requireAuth(), (c) => {
+  const user = c.get("user")
+  return c.json({ user })
+})
+
+app.post("/posts", requireAuth(), async (c) => {
+  const user = c.get("user")
+  const body = await c.req.json()
+
+  // Create post with user.id
+  return c.json({ success: true })
+})
+```
+
+### Protect Route Groups
+
+Apply middleware to specific routes:
+
+```typescript
+import { Hono } from "hono"
+import { requireAuth } from "@arraf-auth/hono"
+
+const protectedRoutes = new Hono()
+
+protectedRoutes.use("*", requireAuth())
+
+protectedRoutes.get("/dashboard", (c) => {
+  const user = c.get("user")
+  return c.json({ user })
+})
+
+protectedRoutes.get("/settings", (c) => {
+  const user = c.get("user")
+  return c.json({ user })
+})
+
+app.route("/", protectedRoutes)
+```
+
+### Custom Authorization
+
+Implement custom authorization logic:
+
+```typescript
+import { createMiddleware } from "hono/factory"
+
+const requireRole = (role: string) => {
+  return createMiddleware(async (c, next) => {
+    const user = c.get("user")
+
+    if (!user) {
+      return c.json({ error: "Unauthorized" }, 401)
+    }
+
+    if (user.role !== role) {
+      return c.json({ error: "Forbidden" }, 403)
+    }
+
+    await next()
+  })
+}
+
+app.get("/admin", requireRole("admin"), (c) => {
+  return c.json({ message: "Admin area" })
+})
+```
+
+## Complete Example
+
+```typescript app.ts
+import { Hono } from "hono"
+import { arrafAuth, sessionMiddleware, requireAuth } from "@arraf-auth/hono"
+import type { AuthVariables } from "@arraf-auth/hono"
+import { auth } from "./lib/auth"
+
+type Variables = AuthVariables
+
+const app = new Hono<{ Variables: Variables }>()
+
+// Mount auth routes
+app.route("/auth", arrafAuth({ auth }))
+
+// Session middleware for all routes
+app.use("*", sessionMiddleware({ auth }))
+
+// Public routes
+app.get("/", (c) => {
+  const user = c.get("user")
+
+  if (user) {
+    return c.json({ message: `Hello ${user.name}` })
+  }
+
+  return c.json({ message: "Hello Guest" })
+})
+
+// Protected routes
+app.get("/profile", requireAuth(), (c) => {
+  const user = c.get("user")
+  const session = c.get("session")
+
+  return c.json({ user, session })
+})
+
+app.get("/dashboard", requireAuth(), (c) => {
+  const user = c.get("user")
+
+  return c.json({
+    message: `Welcome to your dashboard, ${user.name}`,
+    user,
+  })
+})
+
+app.post("/posts", requireAuth(), async (c) => {
+  const user = c.get("user")
+  const body = await c.req.json()
+
+  // Create post with user.id
+  return c.json({
+    success: true,
+    post: {
+      ...body,
+      authorId: user.id,
+    },
+  })
+})
+
+export default app
+```
+
+## TypeScript Support
+
+### Type-Safe Context
+
+Use the `AuthVariables` type for full type safety:
+
+```typescript
+import { Hono } from "hono"
+import type { AuthVariables } from "@arraf-auth/hono"
+
+type Variables = AuthVariables
+
+const app = new Hono<{ Variables: Variables }>()
+
+app.get("/profile", (c) => {
+  // TypeScript knows about user and session
+  const user = c.get("user")
+  const session = c.get("session")
+
+  if (user) {
+    // user.id, user.email, etc. are all typed
+    const userId = user.id
+  }
+
+  return c.json({ user, session })
+})
+```
+
+### AuthVariables Type
+
+```typescript
+type AuthVariables = {
+  user: {
+    id: string
+    email: string | null
+    phone: string | null
+    name: string | null
+  } | null
+  session: {
+    id: string
+    expiresAt: Date
+  } | null
+}
+```
+
+### Custom Variables
+
+Extend with your own variables:
+
+```typescript
+import type { AuthVariables } from "@arraf-auth/hono"
+
+type Variables = AuthVariables & {
+  requestId: string
+  db: Database
+}
+
+const app = new Hono<{ Variables: Variables }>()
+```
+
+## Deployment
+
+### Cloudflare Workers
+
+```typescript
+import { Hono } from "hono"
+import { arrafAuth, sessionMiddleware, requireAuth } from "@arraf-auth/hono"
+import type { AuthVariables } from "@arraf-auth/hono"
+import { auth } from "./lib/auth"
+
+type Variables = AuthVariables
+
+const app = new Hono<{ Variables: Variables }>()
+
+app.route("/auth", arrafAuth({ auth }))
+app.use("*", sessionMiddleware({ auth }))
+
+app.get("/", (c) => c.text("Hello Cloudflare Workers!"))
+
+export default app
+```
+
+### Bun
+
+```typescript
+import { Hono } from "hono"
+import { arrafAuth, sessionMiddleware } from "@arraf-auth/hono"
+import { auth } from "./lib/auth"
+
+const app = new Hono()
+
+app.route("/auth", arrafAuth({ auth }))
+app.use("*", sessionMiddleware({ auth }))
+
+app.get("/", (c) => c.text("Hello Bun!"))
+
+export default {
+  port: 3000,
+  fetch: app.fetch,
+}
+```
+
+### Deno
+
+```typescript
+import { Hono } from "hono"
+import { arrafAuth, sessionMiddleware } from "@arraf-auth/hono"
+import { auth } from "./lib/auth.ts"
+
+const app = new Hono()
+
+app.route("/auth", arrafAuth({ auth }))
+app.use("*", sessionMiddleware({ auth }))
+
+app.get("/", (c) => c.text("Hello Deno!"))
+
+Deno.serve(app.fetch)
+```
+
+## API Reference
+
+### arrafAuth(config)
+
+Creates a Hono app for handling auth requests.
+
+**Parameters:**
+- `config.auth` - Your auth instance (required)
+- `config.basePath` - Base path for auth routes (optional, default: `""`)
+
+**Returns:** Hono app instance
+
+### sessionMiddleware(config)
+
+Middleware that loads session into Hono context.
+
+**Parameters:**
+- `config.auth` - Your auth instance
+
+**Returns:** Hono `MiddlewareHandler`
+
+**Sets:**
+- `c.get("user")` - User object or `null`
+- `c.get("session")` - Session object or `null`
+
+### requireAuth()
+
+Middleware that requires authentication.
+
+**Returns:** Hono `MiddlewareHandler`
+
+**Behavior:**
+- Returns `401` if user is not authenticated
+- Calls `next()` if authenticated
+
+### AuthVariables
+
+TypeScript type for auth context variables.
+
+```typescript
+type AuthVariables = {
+  user: {
+    id: string
+    email: string | null
+    phone: string | null
+    name: string | null
+  } | null
+  session: {
+    id: string
+    expiresAt: Date
+  } | null
+}
+```
+
+## Troubleshooting
+
+### user and session are undefined
+
+Make sure you've:
+1. Added `sessionMiddleware` to your app
+2. Typed your Hono app with `AuthVariables`
+
+```typescript
+import type { AuthVariables } from "@arraf-auth/hono"
+
+type Variables = AuthVariables
+const app = new Hono<{ Variables: Variables }>()
+
+app.use("*", sessionMiddleware({ auth }))
+```
+
+### TypeScript errors on c.get()
+
+Ensure you've added the `Variables` type to your Hono app:
+
+```typescript
+const app = new Hono<{ Variables: AuthVariables }>()
+```
+
+### Cookies not being set
+
+Check that:
+- Your auth handler is properly configured
+- Cookie settings match your environment (secure, domain, etc.)
+- You're using the correct domain in production
+
+<Warning>
+Always place `sessionMiddleware` after mounting auth routes but before routes that need session access.
+</Warning>

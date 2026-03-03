@@ -1,0 +1,154 @@
+---
+title: Verification
+description: The Verification type represents OTP and verification code records
+---
+
+## Verification Interface
+
+The `Verification` interface represents a verification code or OTP (One-Time Password) used for authenticating users, verifying email/phone, or resetting passwords.
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the verification record
+</ResponseField>
+
+<ResponseField name="identifier" type="string" required>
+  The email address or phone number that this verification is for
+</ResponseField>
+
+<ResponseField name="token" type="string" required>
+  The verification code or OTP token. This is what the user enters to verify their identity.
+</ResponseField>
+
+<ResponseField name="type" type="VerificationType" required>
+  The type of verification. See [Verification Types](#verification-types) below.
+</ResponseField>
+
+<ResponseField name="expiresAt" type="Date" required>
+  Timestamp when this verification expires. After this time, the code is no longer valid.
+</ResponseField>
+
+<ResponseField name="attempts" type="number" required>
+  Number of times verification has been attempted. Used to prevent brute force attacks.
+</ResponseField>
+
+<ResponseField name="createdAt" type="Date" required>
+  Timestamp when the verification was created
+</ResponseField>
+
+## Verification Types
+
+The `VerificationType` can be one of the following:
+
+<ResponseField name="phone-otp" type="string">
+  OTP sent via SMS for phone authentication
+</ResponseField>
+
+<ResponseField name="email-otp" type="string">
+  OTP sent via email for email authentication
+</ResponseField>
+
+<ResponseField name="email-verification" type="string">
+  Email verification link or code sent to confirm email ownership
+</ResponseField>
+
+<ResponseField name="password-reset" type="string">
+  Password reset token sent to user's email
+</ResponseField>
+
+<ResponseField name="phone-change" type="string">
+  OTP sent when user is changing their phone number
+</ResponseField>
+
+## Verification Flows
+
+### Phone OTP Flow
+
+1. User enters their phone number
+2. System creates a `Verification` record with type `"phone-otp"`
+3. OTP code is sent via SMS
+4. User enters the code
+5. System validates the code and creates/updates the user account
+
+### Email OTP Flow
+
+1. User enters their email address
+2. System creates a `Verification` record with type `"email-otp"`
+3. OTP code is sent via email
+4. User enters the code
+5. System validates the code and creates/updates the user account
+
+### Email Verification Flow
+
+1. User signs up with email and password
+2. System creates a `Verification` record with type `"email-verification"`
+3. Verification link/code is sent to the email
+4. User clicks link or enters code
+5. Email is marked as verified (`emailVerified: true`)
+
+### Password Reset Flow
+
+1. User requests password reset
+2. System creates a `Verification` record with type `"password-reset"`
+3. Reset link/code is sent to user's email
+4. User clicks link or enters code
+5. User sets a new password
+
+## Usage Example
+
+```typescript
+import { Verification, VerificationType } from "arraf-auth"
+
+// Create phone OTP verification
+const verification: Verification = await auth.createVerification({
+  identifier: "+1234567890",
+  token: "123456",
+  type: "phone-otp",
+  expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+  attempts: 0
+})
+
+// Send OTP via SMS
+await smsProvider.send({
+  to: verification.identifier,
+  message: `Your verification code is: ${verification.token}`
+})
+
+// Verify OTP
+const existingVerification = await auth.getVerification(
+  "+1234567890",
+  "phone-otp"
+)
+
+if (existingVerification) {
+  // Check expiration
+  if (existingVerification.expiresAt < new Date()) {
+    throw new Error("Verification code expired")
+  }
+
+  // Check attempts
+  if (existingVerification.attempts >= 5) {
+    throw new Error("Too many attempts")
+  }
+
+  // Verify token
+  if (existingVerification.token === userInputCode) {
+    // Success! Create or update user
+    await auth.verifyPhone("+1234567890")
+    await auth.deleteVerification(existingVerification.id)
+  } else {
+    // Increment attempts
+    await auth.updateVerification(existingVerification.id, {
+      attempts: existingVerification.attempts + 1
+    })
+    throw new Error("Invalid code")
+  }
+}
+```
+
+<Note>
+  Verification codes should have a short expiration time (typically 5-15 minutes) and a maximum number of attempts (typically 3-5) to prevent abuse.
+</Note>
+
+<Info>
+  Configure OTP settings in `AuthConfig.otp` to customize code length, expiration time, max attempts, and SMS message template.
+</Info>

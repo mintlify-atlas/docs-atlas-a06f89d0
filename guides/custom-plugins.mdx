@@ -1,0 +1,665 @@
+---
+title: Custom Plugins
+description: Extend Arraf Auth with custom plugins for logging, analytics, webhooks, and more
+---
+
+Plugins allow you to extend Arraf Auth with custom functionality using lifecycle hooks and custom API routes.
+
+## Plugin Interface
+
+A plugin is an object with an ID, optional hooks, and optional routes:
+
+```typescript
+interface Plugin {
+  id: string
+  routes?: Record<string, RouteHandler>
+  hooks?: PluginHooks
+}
+
+interface PluginHooks {
+  beforeSignIn?: (user: User) => Promise<void>
+  afterSignIn?: (user: User, session: Session) => Promise<void>
+  beforeSignUp?: (data: Partial<User>) => Promise<void>
+  afterSignUp?: (user: User) => Promise<void>
+  beforeSignOut?: (session: Session) => Promise<void>
+  afterOTPVerified?: (user: User, type: VerificationType) => Promise<void>
+}
+
+type RouteHandler = (req: Request) => Promise<Response>
+```
+
+## Lifecycle Hooks
+
+Hooks are called at specific points in the authentication flow:
+
+| Hook | When Called | Use Cases |
+|------|-------------|----------|
+| `beforeSignUp` | Before creating a new user | Validation, email domain checks |
+| `afterSignUp` | After user is created | Welcome emails, analytics |
+| `beforeSignIn` | Before signing in existing user | Account status checks |
+| `afterSignIn` | After session is created | Activity logging, notifications |
+| `beforeSignOut` | Before destroying session | Cleanup tasks |
+| `afterOTPVerified` | After successful OTP verification | 2FA logging, fraud detection |
+
+## Basic Plugin Example
+
+Here's a simple logging plugin:
+
+```typescript
+import { Plugin } from '@arraf-auth/core'
+
+const loggingPlugin: Plugin = {
+  id: 'logging',
+  
+  hooks: {
+    afterSignUp: async (user) => {
+      console.log(`New user registered: ${user.id}`, {
+        email: user.email,
+        phone: user.phone,
+        timestamp: new Date().toISOString()
+      })
+    },
+    
+    afterSignIn: async (user, session) => {
+      console.log(`User signed in: ${user.id}`, {
+        sessionId: session.id,
+        ipAddress: session.ipAddress,
+        userAgent: session.userAgent,
+        timestamp: new Date().toISOString()
+      })
+    },
+    
+    beforeSignOut: async (session) => {
+      console.log(`User signing out: ${session.userId}`, {
+        sessionId: session.id,
+        timestamp: new Date().toISOString()
+      })
+    }
+  }
+}
+
+// Add to auth config
+import { createAuth } from '@arraf-auth/core'
+
+const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: adapter,
+  plugins: [loggingPlugin]
+})
+```
+
+## Analytics Plugin
+
+Track authentication events with your analytics provider:
+
+```typescript
+import { Plugin } from '@arraf-auth/core'
+import { Analytics } from '@segment/analytics-node'
+
+const analytics = new Analytics({
+  writeKey: process.env.SEGMENT_WRITE_KEY!
+})
+
+const analyticsPlugin: Plugin = {
+  id: 'analytics',
+  
+  hooks: {
+    afterSignUp: async (user) => {
+      analytics.identify({
+        userId: user.id,
+        traits: {
+          email: user.email,
+          phone: user.phone,
+          name: user.name,
+          createdAt: user.createdAt
+        }
+      })
+      
+      analytics.track({
+        userId: user.id,
+        event: 'User Signed Up',
+        properties: {
+          method: user.email ? 'email' : 'phone',
+          timestamp: new Date()
+        }
+      })
+    },
+    
+    afterSignIn: async (user, session) => {
+      analytics.track({
+        userId: user.id,
+        event: 'User Signed In',
+        properties: {
+          sessionId: session.id,
+          ipAddress: session.ipAddress,
+          userAgent: session.userAgent,
+          timestamp: new Date()
+        }
+      })
+    },
+    
+    afterOTPVerified: async (user, type) => {
+      analytics.track({
+        userId: user.id,
+        event: 'OTP Verified',
+        properties: {
+          verificationType: type,
+          timestamp: new Date()
+        }
+      })
+    }
+  }
+}
+```
+
+## Webhook Plugin
+
+Send webhooks for authentication events:
+
+```typescript
+import { Plugin } from '@arraf-auth/core'
+
+interface WebhookPayload {
+  event: string
+  userId: string
+  timestamp: string
+  data: Record<string, any>
+}
+
+async function sendWebhook(payload: WebhookPayload) {
+  const response = await fetch(process.env.WEBHOOK_URL!, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Webhook-Secret': process.env.WEBHOOK_SECRET!
+    },
+    body: JSON.stringify(payload)
+  })
+  
+  if (!response.ok) {
+    console.error('Webhook failed:', await response.text())
+  }
+}
+
+const webhookPlugin: Plugin = {
+  id: 'webhooks',
+  
+  hooks: {
+    afterSignUp: async (user) => {
+      await sendWebhook({
+        event: 'user.created',
+        userId: user.id,
+        timestamp: new Date().toISOString(),
+        data: {
+          email: user.email,
+          phone: user.phone,
+          name: user.name
+        }
+      })
+    },
+    
+    afterSignIn: async (user, session) => {
+      await sendWebhook({
+        event: 'user.signed_in',
+        userId: user.id,
+        timestamp: new Date().toISOString(),
+        data: {
+          sessionId: session.id,
+          ipAddress: session.ipAddress
+        }
+      })
+    }
+  }
+}
+```
+
+## Email Notification Plugin
+
+Send welcome emails to new users:
+
+```typescript
+import { Plugin } from '@arraf-auth/core'
+import nodemailer from 'nodemailer'
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT),
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  }
+})
+
+const emailPlugin: Plugin = {
+  id: 'email-notifications',
+  
+  hooks: {
+    afterSignUp: async (user) => {
+      if (!user.email) return
+      
+      await transporter.sendMail({
+        from: 'noreply@yourapp.com',
+        to: user.email,
+        subject: 'Welcome to Our App!',
+        html: `
+          <h1>Welcome ${user.name || 'there'}!</h1>
+          <p>Thank you for signing up. We're excited to have you on board.</p>
+          <p>If you have any questions, feel free to reach out to our support team.</p>
+        `
+      })
+    },
+    
+    afterSignIn: async (user, session) => {
+      if (!user.email) return
+      
+      // Send security notification for new device
+      const isNewDevice = await checkIfNewDevice(user.id, session.userAgent)
+      
+      if (isNewDevice) {
+        await transporter.sendMail({
+          from: 'security@yourapp.com',
+          to: user.email,
+          subject: 'New Sign-In Detected',
+          html: `
+            <h2>New sign-in to your account</h2>
+            <p>We detected a sign-in from a new device:</p>
+            <ul>
+              <li>IP Address: ${session.ipAddress}</li>
+              <li>Device: ${session.userAgent}</li>
+              <li>Time: ${new Date().toLocaleString()}</li>
+            </ul>
+            <p>If this wasn't you, please secure your account immediately.</p>
+          `
+        })
+      }
+    }
+  }
+}
+```
+
+## Rate Limiting Plugin
+
+Add rate limiting and security checks:
+
+```typescript
+import { Plugin } from '@arraf-auth/core'
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(5, '1 h')
+})
+
+const securityPlugin: Plugin = {
+  id: 'security',
+  
+  hooks: {
+    beforeSignIn: async (user) => {
+      // Check if account is locked
+      const lockKey = `account:lock:${user.id}`
+      const redis = Redis.fromEnv()
+      const locked = await redis.get(lockKey)
+      
+      if (locked) {
+        throw new Error('Account is temporarily locked due to suspicious activity')
+      }
+      
+      // Rate limit sign-in attempts
+      const { success } = await ratelimit.limit(`signin:${user.id}`)
+      if (!success) {
+        // Lock account after too many attempts
+        await redis.set(lockKey, '1', { ex: 3600 }) // 1 hour
+        throw new Error('Too many sign-in attempts. Account locked for 1 hour.')
+      }
+    },
+    
+    afterSignIn: async (user) => {
+      // Clear failed attempts on successful login
+      const redis = Redis.fromEnv()
+      await redis.del(`failed:${user.id}`)
+    },
+    
+    beforeSignUp: async (data) => {
+      // Prevent sign-ups from disposable email providers
+      if (data.email) {
+        const disposableDomains = ['tempmail.com', 'guerrillamail.com', '10minutemail.com']
+        const domain = data.email.split('@')[1]
+        
+        if (disposableDomains.includes(domain)) {
+          throw new Error('Disposable email addresses are not allowed')
+        }
+      }
+      
+      // Check email domain whitelist
+      if (process.env.ALLOWED_EMAIL_DOMAINS) {
+        const allowedDomains = process.env.ALLOWED_EMAIL_DOMAINS.split(',')
+        const domain = data.email?.split('@')[1]
+        
+        if (domain && !allowedDomains.includes(domain)) {
+          throw new Error(`Only ${allowedDomains.join(', ')} email addresses are allowed`)
+        }
+      }
+    }
+  }
+}
+```
+
+## Custom Routes Plugin
+
+Add custom API endpoints to your auth system:
+
+```typescript
+import { Plugin } from '@arraf-auth/core'
+
+const customRoutesPlugin: Plugin = {
+  id: 'custom-routes',
+  
+  routes: {
+    '/auth/profile': async (req: Request) => {
+      // Get session from cookie
+      const sessionToken = getSessionFromCookie(req)
+      if (!sessionToken) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+      
+      // Find session and user
+      const session = await auth.adapter.findSession(sessionToken)
+      if (!session || session.expiresAt < new Date()) {
+        return Response.json({ error: 'Session expired' }, { status: 401 })
+      }
+      
+      const user = await auth.adapter.findUserById(session.userId)
+      if (!user) {
+        return Response.json({ error: 'User not found' }, { status: 404 })
+      }
+      
+      return Response.json({ user })
+    },
+    
+    '/auth/sessions': async (req: Request) => {
+      const sessionToken = getSessionFromCookie(req)
+      if (!sessionToken) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+      
+      const session = await auth.adapter.findSession(sessionToken)
+      if (!session) {
+        return Response.json({ error: 'Invalid session' }, { status: 401 })
+      }
+      
+      // Get all sessions for this user
+      const sessions = await getAllUserSessions(session.userId)
+      
+      return Response.json({ sessions })
+    },
+    
+    '/auth/delete-account': async (req: Request) => {
+      if (req.method !== 'DELETE') {
+        return Response.json({ error: 'Method not allowed' }, { status: 405 })
+      }
+      
+      const sessionToken = getSessionFromCookie(req)
+      if (!sessionToken) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+      
+      const session = await auth.adapter.findSession(sessionToken)
+      if (!session) {
+        return Response.json({ error: 'Invalid session' }, { status: 401 })
+      }
+      
+      // Delete user and all associated data (cascades)
+      await auth.adapter.deleteUser(session.userId)
+      
+      return Response.json({ success: true })
+    }
+  }
+}
+
+// Use custom routes in your app
+// app/api/auth/profile/route.ts
+export async function GET(req: Request) {
+  return auth.handler('/auth/profile', req)
+}
+```
+
+## Multi-Factor Authentication Plugin
+
+Implement TOTP-based 2FA:
+
+```typescript
+import { Plugin } from '@arraf-auth/core'
+import * as speakeasy from 'speakeasy'
+import * as QRCode from 'qrcode'
+
+const mfaPlugin: Plugin = {
+  id: 'mfa',
+  
+  routes: {
+    '/auth/mfa/setup': async (req: Request) => {
+      const user = await getCurrentUser(req)
+      if (!user) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+      
+      // Generate secret
+      const secret = speakeasy.generateSecret({
+        name: `YourApp (${user.email || user.phone})`
+      })
+      
+      // Store secret temporarily (should be confirmed before saving permanently)
+      await storeTempMFASecret(user.id, secret.base32)
+      
+      // Generate QR code
+      const qrCode = await QRCode.toDataURL(secret.otpauth_url!)
+      
+      return Response.json({
+        secret: secret.base32,
+        qrCode
+      })
+    },
+    
+    '/auth/mfa/verify': async (req: Request) => {
+      const user = await getCurrentUser(req)
+      if (!user) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+      
+      const { token } = await req.json()
+      const secret = await getTempMFASecret(user.id)
+      
+      if (!secret) {
+        return Response.json({ error: 'No MFA setup in progress' }, { status: 400 })
+      }
+      
+      // Verify token
+      const verified = speakeasy.totp.verify({
+        secret,
+        encoding: 'base32',
+        token
+      })
+      
+      if (!verified) {
+        return Response.json({ error: 'Invalid token' }, { status: 400 })
+      }
+      
+      // Save MFA secret permanently
+      await saveMFASecret(user.id, secret)
+      await deleteTempMFASecret(user.id)
+      
+      return Response.json({ success: true })
+    }
+  },
+  
+  hooks: {
+    afterSignIn: async (user, session) => {
+      // Check if user has MFA enabled
+      const mfaEnabled = await checkMFAEnabled(user.id)
+      
+      if (mfaEnabled) {
+        // Mark session as requiring MFA verification
+        await auth.adapter.updateSession(session.token, {
+          mfaVerified: false // You'd need to add this field
+        })
+      }
+    }
+  }
+}
+```
+
+## Audit Log Plugin
+
+Track all authentication events:
+
+```typescript
+import { Plugin } from '@arraf-auth/core'
+
+interface AuditLog {
+  userId: string
+  event: string
+  ipAddress?: string
+  userAgent?: string
+  metadata?: Record<string, any>
+  timestamp: Date
+}
+
+async function logAuditEvent(log: AuditLog) {
+  // Save to database
+  await db.auditLog.create({ data: log })
+}
+
+const auditPlugin: Plugin = {
+  id: 'audit',
+  
+  hooks: {
+    afterSignUp: async (user) => {
+      await logAuditEvent({
+        userId: user.id,
+        event: 'user_registered',
+        metadata: {
+          email: user.email,
+          phone: user.phone,
+          method: user.email ? 'email' : 'phone'
+        },
+        timestamp: new Date()
+      })
+    },
+    
+    afterSignIn: async (user, session) => {
+      await logAuditEvent({
+        userId: user.id,
+        event: 'user_signed_in',
+        ipAddress: session.ipAddress,
+        userAgent: session.userAgent,
+        metadata: {
+          sessionId: session.id
+        },
+        timestamp: new Date()
+      })
+    },
+    
+    beforeSignOut: async (session) => {
+      await logAuditEvent({
+        userId: session.userId,
+        event: 'user_signed_out',
+        ipAddress: session.ipAddress,
+        userAgent: session.userAgent,
+        metadata: {
+          sessionId: session.id
+        },
+        timestamp: new Date()
+      })
+    },
+    
+    afterOTPVerified: async (user, type) => {
+      await logAuditEvent({
+        userId: user.id,
+        event: 'otp_verified',
+        metadata: {
+          verificationType: type
+        },
+        timestamp: new Date()
+      })
+    }
+  }
+}
+```
+
+## Error Handling in Plugins
+
+Handle errors gracefully in your plugins:
+
+```typescript
+const resilientPlugin: Plugin = {
+  id: 'resilient',
+  
+  hooks: {
+    afterSignUp: async (user) => {
+      try {
+        // Attempt to send welcome email
+        await sendWelcomeEmail(user.email)
+      } catch (error) {
+        // Log error but don't fail the sign-up process
+        console.error('Failed to send welcome email:', error)
+        
+        // Optionally, queue for retry
+        await queueWelcomeEmail(user.id)
+      }
+    },
+    
+    afterSignIn: async (user, session) => {
+      try {
+        // Track analytics
+        await analytics.track('user_signed_in', { userId: user.id })
+      } catch (error) {
+        // Analytics failure shouldn't block sign-in
+        console.error('Analytics tracking failed:', error)
+      }
+    }
+  }
+}
+```
+
+<Warning>
+**Important:** If a hook throws an error, it will abort the authentication flow. Only throw errors when you want to prevent the operation (e.g., blocking sign-up). For non-critical tasks like analytics, catch and log errors instead.
+</Warning>
+
+## Plugin Composition
+
+Combine multiple plugins:
+
+```typescript
+import { createAuth } from '@arraf-auth/core'
+
+const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: adapter,
+  plugins: [
+    loggingPlugin,
+    analyticsPlugin,
+    webhookPlugin,
+    emailPlugin,
+    securityPlugin,
+    auditPlugin
+  ]
+})
+```
+
+Plugins are executed in order, so place critical plugins (like security) first.
+
+<Tip>
+**Best Practices:**
+- Keep plugins focused on a single responsibility
+- Handle errors gracefully to avoid blocking auth flows
+- Use async/await for all hook implementations
+- Log plugin errors for debugging
+- Test plugins in isolation before combining them
+- Use environment variables for plugin configuration
+</Tip>
+
+## Next Steps
+
+- [Set up phone OTP authentication](/guides/phone-otp)
+- [Configure OAuth providers](/guides/oauth)
+- [Set up your database](/guides/database-setup)

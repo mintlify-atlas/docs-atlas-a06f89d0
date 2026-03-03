@@ -1,0 +1,271 @@
+---
+title: 'OAuth Provider'
+description: 'Base interface for implementing custom OAuth 2.0 providers in Arraf Auth'
+---
+
+## Overview
+
+The `OAuthProvider` interface defines the contract for implementing OAuth 2.0 authentication providers in Arraf Auth. Use this interface to create custom OAuth providers for any service that supports OAuth 2.0.
+
+## Interface Definition
+
+The `OAuthProvider` interface is defined in `@arraf-auth/core`:
+
+```typescript
+export interface OAuthProvider {
+    id: string
+    name: string
+    clientId: string
+    clientSecret: string
+    scopes: string[]
+    getAuthorizationUrl(state: string, codeVerifier?: string): string
+    exchangeCode(code: string, codeVerifier?: string): Promise<OAuthTokens>
+    getUserProfile(accessToken: string): Promise<OAuthProfile>
+}
+```
+
+## Properties
+
+<ParamField path="id" type="string" required>
+  Unique identifier for the provider (e.g., "google", "github")
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Display name for the provider (e.g., "Google", "GitHub")
+</ParamField>
+
+<ParamField path="clientId" type="string" required>
+  OAuth 2.0 client ID obtained from the provider's developer console
+</ParamField>
+
+<ParamField path="clientSecret" type="string" required>
+  OAuth 2.0 client secret obtained from the provider's developer console
+</ParamField>
+
+<ParamField path="scopes" type="string[]" required>
+  Array of OAuth scopes to request from the provider
+</ParamField>
+
+## Methods
+
+### getAuthorizationUrl
+
+Generates the OAuth authorization URL where users will be redirected to authenticate.
+
+<ParamField path="state" type="string" required>
+  CSRF protection token that will be validated in the callback
+</ParamField>
+
+<ParamField path="codeVerifier" type="string">
+  PKCE code verifier for enhanced security (optional)
+</ParamField>
+
+<ResponseField name="return" type="string">
+  The complete authorization URL with all required parameters
+</ResponseField>
+
+### exchangeCode
+
+Exchanges the authorization code for access tokens.
+
+<ParamField path="code" type="string" required>
+  Authorization code received from the OAuth callback
+</ParamField>
+
+<ParamField path="codeVerifier" type="string">
+  PKCE code verifier to validate the authorization request
+</ParamField>
+
+<ResponseField name="return" type="Promise<OAuthTokens>">
+  Promise resolving to OAuth tokens
+</ResponseField>
+
+### getUserProfile
+
+Fetches the authenticated user's profile information.
+
+<ParamField path="accessToken" type="string" required>
+  Access token obtained from the token exchange
+</ParamField>
+
+<ResponseField name="return" type="Promise<OAuthProfile>">
+  Promise resolving to the user's profile data
+</ResponseField>
+
+## Related Types
+
+### OAuthTokens
+
+```typescript
+export interface OAuthTokens {
+    accessToken: string
+    refreshToken?: string
+    expiresIn?: number
+    tokenType: string
+}
+```
+
+<ResponseField name="accessToken" type="string" required>
+  The access token for API requests
+</ResponseField>
+
+<ResponseField name="refreshToken" type="string">
+  Optional refresh token for obtaining new access tokens
+</ResponseField>
+
+<ResponseField name="expiresIn" type="number">
+  Token expiration time in seconds
+</ResponseField>
+
+<ResponseField name="tokenType" type="string" required>
+  Token type (typically "Bearer")
+</ResponseField>
+
+### OAuthProfile
+
+```typescript
+export interface OAuthProfile {
+    id: string
+    email?: string
+    phone?: string
+    name?: string
+    image?: string
+    emailVerified?: boolean
+}
+```
+
+<ResponseField name="id" type="string" required>
+  Provider-specific unique user identifier
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  User's email address
+</ResponseField>
+
+<ResponseField name="phone" type="string">
+  User's phone number
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  User's full name
+</ResponseField>
+
+<ResponseField name="image" type="string">
+  URL to user's profile picture
+</ResponseField>
+
+<ResponseField name="emailVerified" type="boolean">
+  Whether the email has been verified by the provider
+</ResponseField>
+
+## Implementation Example
+
+Here's how to implement a custom OAuth provider:
+
+```typescript
+import type { OAuthProvider, OAuthTokens, OAuthProfile } from "@arraf-auth/core"
+import { buildAuthorizationUrl, exchangeCodeForTokens } from "@arraf-auth/core"
+
+export interface CustomProviderConfig {
+    clientId: string
+    clientSecret: string
+    redirectUri: string
+    scopes?: string[]
+}
+
+export function customProvider(config: CustomProviderConfig): OAuthProvider {
+    const scopes = config.scopes ?? ["openid", "email", "profile"]
+
+    return {
+        id: "custom",
+        name: "Custom Provider",
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        scopes,
+
+        getAuthorizationUrl(state: string, codeVerifier?: string) {
+            return buildAuthorizationUrl(
+                "https://provider.com/oauth/authorize",
+                {
+                    client_id: config.clientId,
+                    redirect_uri: config.redirectUri,
+                    response_type: "code",
+                    scope: scopes.join(" "),
+                    state,
+                }
+            )
+        },
+
+        async exchangeCode(code: string, codeVerifier?: string) {
+            const response = await exchangeCodeForTokens(
+                "https://provider.com/oauth/token",
+                {
+                    code,
+                    client_id: config.clientId,
+                    client_secret: config.clientSecret,
+                    redirect_uri: config.redirectUri,
+                    grant_type: "authorization_code",
+                }
+            )
+
+            if (!response.ok) {
+                throw new Error("Token exchange failed")
+            }
+
+            const tokens = await response.json()
+
+            return {
+                accessToken: tokens.access_token,
+                refreshToken: tokens.refresh_token,
+                expiresIn: tokens.expires_in,
+                tokenType: tokens.token_type,
+            } satisfies OAuthTokens
+        },
+
+        async getUserProfile(accessToken: string) {
+            const response = await fetch("https://provider.com/api/user", {
+                headers: { Authorization: `Bearer ${accessToken}` },
+            })
+
+            if (!response.ok) {
+                throw new Error("Failed to fetch user profile")
+            }
+
+            const profile = await response.json()
+
+            return {
+                id: profile.id,
+                email: profile.email,
+                name: profile.name,
+                image: profile.avatar,
+                emailVerified: profile.email_verified,
+            } satisfies OAuthProfile
+        },
+    }
+}
+```
+
+## Usage
+
+Add your custom provider to the Arraf Auth configuration:
+
+```typescript
+import { ArrafAuth } from "@arraf-auth/core"
+import { customProvider } from "./providers/custom"
+
+const auth = new ArrafAuth({
+    secret: process.env.AUTH_SECRET,
+    database: adapter,
+    providers: [
+        customProvider({
+            clientId: process.env.CUSTOM_CLIENT_ID!,
+            clientSecret: process.env.CUSTOM_CLIENT_SECRET!,
+            redirectUri: "https://yourdomain.com/api/auth/callback/custom",
+        }),
+    ],
+})
+```
+
+<Note>
+  Use the helper functions `buildAuthorizationUrl` and `exchangeCodeForTokens` from `@arraf-auth/core` to simplify OAuth implementation.
+</Note>

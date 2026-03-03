@@ -1,0 +1,256 @@
+---
+title: 'GitHub Provider'
+description: 'Official GitHub OAuth provider for Arraf Auth'
+---
+
+## Overview
+
+The GitHub provider enables authentication using GitHub accounts. It implements the OAuth 2.0 protocol and automatically retrieves verified email addresses from private accounts.
+
+## Installation
+
+```bash
+npm install @arraf-auth/github
+```
+
+## Setup
+
+### 1. Create OAuth App
+
+1. Go to [GitHub Settings](https://github.com/settings/developers)
+2. Click **OAuth Apps** > **New OAuth App**
+3. Fill in the application details:
+   - **Application name**: Your app name
+   - **Homepage URL**: `https://yourdomain.com`
+   - **Authorization callback URL**:
+     - Development: `http://localhost:3000/api/auth/callback/github`
+     - Production: `https://yourdomain.com/api/auth/callback/github`
+4. Click **Register application**
+5. Save your **Client ID** and generate a **Client Secret**
+
+### 2. Configure Environment Variables
+
+```bash
+GITHUB_CLIENT_ID=your_client_id_here
+GITHUB_CLIENT_SECRET=your_client_secret_here
+```
+
+## Configuration
+
+```typescript
+import { github } from "@arraf-auth/github"
+```
+
+### GitHubProviderConfig
+
+<ParamField path="clientId" type="string" required>
+  OAuth client ID from GitHub OAuth App settings
+</ParamField>
+
+<ParamField path="clientSecret" type="string" required>
+  OAuth client secret from GitHub OAuth App settings
+</ParamField>
+
+<ParamField path="redirectUri" type="string" required>
+  The callback URL where users will be redirected after authentication
+</ParamField>
+
+<ParamField path="scopes" type="string[]">
+  OAuth scopes to request. Defaults to `["read:user", "user:email"]`
+</ParamField>
+
+## Usage
+
+<CodeGroup>
+
+```typescript Next.js
+import { ArrafAuth } from "@arraf-auth/core"
+import { github } from "@arraf-auth/github"
+import { adapter } from "./db"
+
+const auth = new ArrafAuth({
+    secret: process.env.AUTH_SECRET!,
+    database: adapter,
+    providers: [
+        github({
+            clientId: process.env.GITHUB_CLIENT_ID!,
+            clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+            redirectUri: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback/github`,
+        }),
+    ],
+})
+
+export default auth
+```
+
+```typescript Express
+import { ArrafAuth } from "@arraf-auth/core"
+import { github } from "@arraf-auth/github"
+import { adapter } from "./db"
+
+const auth = new ArrafAuth({
+    secret: process.env.AUTH_SECRET!,
+    database: adapter,
+    providers: [
+        github({
+            clientId: process.env.GITHUB_CLIENT_ID!,
+            clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+            redirectUri: "http://localhost:3000/auth/callback/github",
+        }),
+    ],
+})
+
+export { auth }
+```
+
+</CodeGroup>
+
+## Custom Scopes
+
+Request additional permissions from GitHub:
+
+```typescript
+github({
+    clientId: process.env.GITHUB_CLIENT_ID!,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+    redirectUri: "https://yourdomain.com/api/auth/callback/github",
+    scopes: [
+        "read:user",
+        "user:email",
+        "repo",
+        "read:org",
+    ],
+})
+```
+
+### Available Scopes
+
+- `read:user` - Read user profile data
+- `user:email` - Access user email addresses (required for email retrieval)
+- `repo` - Full control of private repositories
+- `public_repo` - Access public repositories
+- `read:org` - Read organization membership
+- `gist` - Create and edit gists
+
+See [GitHub OAuth Scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) for a complete list.
+
+## Implementation Details
+
+The GitHub provider is implemented in `/home/daytona/workspace/source/packages/providers/github/src/index.ts:1`:
+
+```typescript
+export function github(config: GitHubProviderConfig): OAuthProvider {
+    const scopes = config.scopes ?? [
+        "read:user",
+        "user:email",
+    ]
+
+    return {
+        id: "github",
+        name: "GitHub",
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        scopes,
+
+        getAuthorizationUrl(state: string) {
+            return buildAuthorizationUrl(
+                "https://github.com/login/oauth/authorize",
+                {
+                    client_id: config.clientId,
+                    redirect_uri: config.redirectUri,
+                    scope: scopes.join(" "),
+                    state,
+                }
+            )
+        },
+
+        async exchangeCode(code: string) {
+            // Token exchange implementation
+        },
+
+        async getUserProfile(accessToken: string) {
+            // User profile fetching with email retrieval
+        },
+    }
+}
+```
+
+### Email Retrieval
+
+The provider automatically handles email retrieval for accounts with private email settings (see `/home/daytona/workspace/source/packages/providers/github/src/index.ts:101`):
+
+```typescript
+let primaryEmail = profile.email
+
+if (!primaryEmail) {
+    const emailsResponse = await fetch(
+        "https://api.github.com/user/emails",
+        {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                Accept: "application/vnd.github+json",
+            },
+        }
+    )
+
+    if (emailsResponse.ok) {
+        const emails: GitHubEmail[] = await emailsResponse.json()
+        const primary = emails.find((e) => e.primary && e.verified)
+        primaryEmail = primary?.email ?? null
+    }
+}
+```
+
+<Note>
+  The provider requires the `user:email` scope to access email addresses for accounts with private email settings.
+</Note>
+
+## User Profile
+
+The provider returns the following user profile data:
+
+<ResponseField name="id" type="string">
+  GitHub user ID (converted to string)
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  User's primary verified email address
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  User's full name, or login username if name is not set
+</ResponseField>
+
+<ResponseField name="image" type="string">
+  URL to user's avatar image
+</ResponseField>
+
+<ResponseField name="emailVerified" type="boolean">
+  Always `true` - GitHub only returns verified email addresses
+</ResponseField>
+
+## Features
+
+- Full OAuth 2.0 implementation
+- Automatic email retrieval for private accounts
+- Verified email addresses only
+- Falls back to username if name is not set
+- Support for all GitHub OAuth scopes
+
+## Troubleshooting
+
+### Redirect URI Mismatch
+
+Ensure the redirect URI in your code exactly matches the authorization callback URL configured in your GitHub OAuth App, including the protocol (http/https) and trailing slashes.
+
+### Missing Email Error
+
+If you receive a "Could not retrieve email from GitHub account" error:
+
+1. Verify the `user:email` scope is included in your configuration
+2. Ensure the user has at least one verified email address on their GitHub account
+3. Check that the user hasn't blocked email access in their GitHub privacy settings
+
+### Invalid Client Error
+
+Double-check that your `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` environment variables are correctly set and match your OAuth App credentials.

@@ -1,0 +1,589 @@
+---
+title: Plugin System
+description: Extend Arraf Auth with custom logic using the plugin system and lifecycle hooks for authentication, sign-up, and verification events
+---
+
+Arraf Auth provides a powerful plugin system that allows you to extend and customize authentication behavior. Plugins can add custom routes and hook into authentication lifecycle events to execute custom logic.
+
+## Plugin Interface
+
+A plugin is an object that implements the `Plugin` interface:
+
+```typescript
+interface Plugin {
+  id: string                              // Unique plugin identifier
+  routes?: Record<string, RouteHandler>   // Custom route handlers
+  hooks?: PluginHooks                     // Lifecycle hooks
+}
+
+type RouteHandler = (req: Request) => Promise<Response>
+```
+
+See `packages/core/src/types.ts:145-149` for the complete interface definition.
+
+## Plugin Hooks
+
+Lifecycle hooks allow you to execute custom logic at specific points in the authentication flow. All hooks are optional and async.
+
+```typescript
+interface PluginHooks {
+  beforeSignIn?: (user: User) => Promise<void>
+  afterSignIn?: (user: User, session: Session) => Promise<void>
+  beforeSignUp?: (data: Partial<User>) => Promise<void>
+  afterSignUp?: (user: User) => Promise<void>
+  beforeSignOut?: (session: Session) => Promise<void>
+  afterOTPVerified?: (user: User, type: VerificationType) => Promise<void>
+}
+```
+
+See `packages/core/src/types.ts:151-158` for the complete interface.
+
+### Hook Execution Order
+
+Hooks are executed in the order they're defined in your plugin configuration. If you have multiple plugins, their hooks are called sequentially.
+
+<Steps>
+  <Step title="Sign Up Flow">
+    1. `beforeSignUp` - Before user account is created
+    2. User account created in database
+    3. Account record created (credential/phone/OAuth)
+    4. `afterSignUp` - After user account is created
+    5. Session created
+  </Step>
+  
+  <Step title="Sign In Flow">
+    1. Credentials validated
+    2. `beforeSignIn` - Before session is created
+    3. Session created
+    4. `afterSignIn` - After session is created
+  </Step>
+  
+  <Step title="OTP Verification Flow">
+    1. OTP validated
+    2. User created or found
+    3. `beforeSignUp` or `afterSignIn` hook called
+    4. Session created
+    5. `afterOTPVerified` - After OTP is successfully verified
+  </Step>
+</Steps>
+
+## Available Hooks
+
+<AccordionGroup>
+  <Accordion title="beforeSignUp">
+    Called before a new user account is created. Use this to validate or modify user data before it's saved.
+    
+    **Parameters:**
+    - `data: Partial<User>` - User data that will be used to create the account
+    
+    **Example:**
+    ```typescript
+    beforeSignUp: async (data) => {
+      // Validate email domain
+      if (data.email && !data.email.endsWith('@company.com')) {
+        throw new Error('Only company emails are allowed')
+      }
+      
+      // Add custom fields (requires extending your User model)
+      data.role = 'user'
+      data.status = 'pending'
+    }
+    ```
+    
+    **Used in:**
+    - Email+password sign-up (`packages/core/src/routes/sign-up.ts:39-41`)
+    - Phone OTP verification (`packages/core/src/routes/otp-verify.ts:61-66`)
+    - OAuth callback (`packages/core/src/routes/oauth-callback.ts:69-71`)
+  </Accordion>
+  
+  <Accordion title="afterSignUp">
+    Called after a new user account is successfully created. Use this for post-registration tasks.
+    
+    **Parameters:**
+    - `user: User` - The newly created user object
+    
+    **Example:**
+    ```typescript
+    afterSignUp: async (user) => {
+      // Send welcome email
+      await sendEmail({
+        to: user.email,
+        subject: 'Welcome to Arraf Auth!',
+        template: 'welcome',
+        data: { name: user.name }
+      })
+      
+      // Track analytics event
+      await analytics.track({
+        userId: user.id,
+        event: 'User Signed Up',
+        properties: {
+          method: user.phone ? 'phone' : 'email',
+          timestamp: new Date()
+        }
+      })
+      
+      // Create default user settings
+      await db.settings.create({
+        userId: user.id,
+        language: 'ar',
+        notifications: true
+      })
+    }
+    ```
+    
+    **Used in:**
+    - Email+password sign-up (`packages/core/src/routes/sign-up.ts:70-72`)
+    - Phone OTP verification (`packages/core/src/routes/otp-verify.ts:84-86`)
+    - OAuth callback (`packages/core/src/routes/oauth-callback.ts:82-84`)
+  </Accordion>
+  
+  <Accordion title="beforeSignIn">
+    Called before a session is created for an existing user. Use this to enforce access policies.
+    
+    **Parameters:**
+    - `user: User` - The user attempting to sign in
+    
+    **Example:**
+    ```typescript
+    beforeSignIn: async (user) => {
+      // Check if user account is active
+      if (user.status === 'suspended') {
+        throw new Error('Your account has been suspended')
+      }
+      
+      // Enforce email verification for email users
+      if (user.email && !user.emailVerified) {
+        throw new Error('Please verify your email before signing in')
+      }
+      
+      // Rate limiting check
+      const recentAttempts = await getRecentLoginAttempts(user.id)
+      if (recentAttempts > 5) {
+        throw new Error('Too many login attempts. Please try again later.')
+      }
+    }
+    ```
+    
+    **Used in:**
+    - Email+password sign-in (`packages/core/src/routes/sign-in.ts:53-55`)
+    - OAuth callback (`packages/core/src/routes/oauth-callback.ts:105-107`)
+  </Accordion>
+  
+  <Accordion title="afterSignIn">
+    Called after a session is successfully created. Use this for audit logging and analytics.
+    
+    **Parameters:**
+    - `user: User` - The authenticated user
+    - `session: Session` - The newly created session
+    
+    **Example:**
+    ```typescript
+    afterSignIn: async (user, session) => {
+      // Log authentication event
+      await auditLog.create({
+        userId: user.id,
+        action: 'sign_in',
+        ipAddress: session.ipAddress,
+        userAgent: session.userAgent,
+        timestamp: new Date()
+      })
+      
+      // Update last login timestamp
+      await db.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() }
+      })
+      
+      // Send security notification for new device
+      const isNewDevice = await checkIfNewDevice(user.id, session.userAgent)
+      if (isNewDevice) {
+        await sendSecurityAlert(user.email, {
+          device: session.userAgent,
+          location: session.ipAddress,
+          time: new Date()
+        })
+      }
+    }
+    ```
+    
+    **Used in:**
+    - Email+password sign-in (`packages/core/src/routes/sign-in.ts:59-61`)
+    - Phone OTP verification (`packages/core/src/routes/otp-verify.ts:91-93`)
+    - OAuth callback (`packages/core/src/routes/oauth-callback.ts:114-116`)
+  </Accordion>
+  
+  <Accordion title="beforeSignOut">
+    Called before a session is deleted. Use this for cleanup tasks.
+    
+    **Parameters:**
+    - `session: Session` - The session being deleted
+    
+    **Example:**
+    ```typescript
+    beforeSignOut: async (session) => {
+      // Log sign out event
+      await auditLog.create({
+        userId: session.userId,
+        action: 'sign_out',
+        sessionId: session.id,
+        timestamp: new Date()
+      })
+      
+      // Clear user-specific cache
+      await cache.delete(`user:${session.userId}:*`)
+      
+      // Revoke associated OAuth tokens
+      await revokeOAuthTokens(session.userId)
+    }
+    ```
+    
+    **Note:** This hook is defined in the interface but not yet implemented in the core routes. You can implement it when creating custom sign-out routes.
+  </Accordion>
+  
+  <Accordion title="afterOTPVerified">
+    Called after an OTP is successfully verified. Use this for phone/email verification-specific logic.
+    
+    **Parameters:**
+    - `user: User` - The user who verified the OTP
+    - `type: VerificationType` - The type of OTP verified ('phone-otp' or 'email-otp')
+    
+    **Example:**
+    ```typescript
+    afterOTPVerified: async (user, type) => {
+      if (type === 'phone-otp') {
+        // Send confirmation SMS
+        await sms.send({
+          to: user.phone,
+          message: 'Your phone number has been verified successfully!'
+        })
+        
+        // Grant phone-verified badge
+        await db.badge.create({
+          userId: user.id,
+          type: 'phone_verified',
+          earnedAt: new Date()
+        })
+      }
+      
+      // Track verification event
+      await analytics.track({
+        userId: user.id,
+        event: 'OTP Verified',
+        properties: { type }
+      })
+    }
+    ```
+    
+    **Used in:**
+    - Phone/Email OTP verification (`packages/core/src/routes/otp-verify.ts:98-100`)
+  </Accordion>
+</AccordionGroup>
+
+## Creating a Plugin
+
+Here's how to create a custom plugin:
+
+```typescript
+import type { Plugin } from '@arraf-auth/core'
+
+export const analyticsPlugin: Plugin = {
+  id: 'analytics',
+  
+  hooks: {
+    afterSignUp: async (user) => {
+      await analytics.track({
+        userId: user.id,
+        event: 'User Signed Up',
+        properties: {
+          email: user.email,
+          phone: user.phone,
+          method: user.phone ? 'phone' : 'email',
+          timestamp: new Date()
+        }
+      })
+    },
+    
+    afterSignIn: async (user, session) => {
+      await analytics.track({
+        userId: user.id,
+        event: 'User Signed In',
+        properties: {
+          sessionId: session.id,
+          ipAddress: session.ipAddress,
+          userAgent: session.userAgent,
+          timestamp: new Date()
+        }
+      })
+    }
+  }
+}
+```
+
+## Registering Plugins
+
+Add plugins to your auth configuration:
+
+```typescript
+import { createAuth } from '@arraf-auth/core'
+import { analyticsPlugin } from './plugins/analytics'
+import { auditLogPlugin } from './plugins/audit-log'
+import { emailVerificationPlugin } from './plugins/email-verification'
+
+export const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: adapter,
+  plugins: [
+    analyticsPlugin,
+    auditLogPlugin,
+    emailVerificationPlugin
+  ]
+})
+```
+
+<Info>
+Plugins are executed in the order they're defined. If a plugin throws an error, the authentication flow is aborted and subsequent plugins won't execute.
+</Info>
+
+## Custom Routes
+
+Plugins can also add custom routes to the auth router:
+
+```typescript
+export const customAuthPlugin: Plugin = {
+  id: 'custom-auth',
+  
+  routes: {
+    '/verify-email': async (req: Request) => {
+      const { token } = await req.json()
+      
+      // Verify email token
+      const verification = await adapter.findVerification(token, 'email-verification')
+      
+      if (!verification || verification.expiresAt < new Date()) {
+        return Response.json({ error: 'Invalid or expired token' }, { status: 400 })
+      }
+      
+      // Mark email as verified
+      await adapter.updateUser(verification.identifier, {
+        emailVerified: true
+      })
+      
+      // Clean up verification token
+      await adapter.deleteVerification(verification.id)
+      
+      return Response.json({ success: true })
+    },
+    
+    '/change-password': async (req: Request) => {
+      // Custom password change logic
+      // ...
+    }
+  },
+  
+  hooks: {
+    afterSignUp: async (user) => {
+      if (user.email) {
+        // Send verification email
+        await sendVerificationEmail(user.email)
+      }
+    }
+  }
+}
+```
+
+Custom routes are mounted under the auth base path:
+```
+POST /api/auth/verify-email
+POST /api/auth/change-password
+```
+
+## Example Plugins
+
+<Tabs>
+  <Tab title="Audit Logging">
+    ```typescript
+    import type { Plugin } from '@arraf-auth/core'
+    import { prisma } from './db'
+    
+    export const auditLogPlugin: Plugin = {
+      id: 'audit-log',
+      
+      hooks: {
+        afterSignUp: async (user) => {
+          await prisma.auditLog.create({
+            data: {
+              userId: user.id,
+              action: 'SIGN_UP',
+              details: {
+                email: user.email,
+                phone: user.phone,
+                method: user.phone ? 'phone' : 'email'
+              },
+              timestamp: new Date()
+            }
+          })
+        },
+        
+        afterSignIn: async (user, session) => {
+          await prisma.auditLog.create({
+            data: {
+              userId: user.id,
+              action: 'SIGN_IN',
+              details: {
+                sessionId: session.id,
+                ipAddress: session.ipAddress,
+                userAgent: session.userAgent
+              },
+              timestamp: new Date()
+            }
+          })
+        }
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Email Verification">
+    ```typescript
+    import type { Plugin } from '@arraf-auth/core'
+    import { sendEmail } from './email'
+    
+    export const emailVerificationPlugin: Plugin = {
+      id: 'email-verification',
+      
+      hooks: {
+        beforeSignIn: async (user) => {
+          if (user.email && !user.emailVerified) {
+            throw new Error('Please verify your email before signing in')
+          }
+        },
+        
+        afterSignUp: async (user) => {
+          if (user.email) {
+            const token = generateVerificationToken()
+            
+            await adapter.createVerification({
+              identifier: user.email,
+              token,
+              type: 'email-verification',
+              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+              attempts: 0
+            })
+            
+            await sendEmail({
+              to: user.email,
+              subject: 'Verify your email',
+              html: `Click here to verify: https://app.com/verify?token=${token}`
+            })
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Rate Limiting">
+    ```typescript
+    import type { Plugin } from '@arraf-auth/core'
+    import { redis } from './redis'
+    
+    export const rateLimitPlugin: Plugin = {
+      id: 'rate-limit',
+      
+      hooks: {
+        beforeSignIn: async (user) => {
+          const key = `login:${user.id}`
+          const attempts = await redis.incr(key)
+          
+          if (attempts === 1) {
+            await redis.expire(key, 900) // 15 minutes
+          }
+          
+          if (attempts > 5) {
+            throw new Error(
+              'Too many login attempts. Please try again in 15 minutes.'
+            )
+          }
+        },
+        
+        afterSignIn: async (user) => {
+          // Clear rate limit on successful login
+          await redis.del(`login:${user.id}`)
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Error Handling
+
+When a plugin hook throws an error, the authentication flow is aborted:
+
+```typescript
+hooks: {
+  beforeSignUp: async (data) => {
+    if (!isValidEmailDomain(data.email)) {
+      throw new Error('Invalid email domain')
+    }
+  }
+}
+```
+
+The error message is returned to the client:
+```json
+{
+  "error": "Invalid email domain"
+}
+```
+
+<Warning>
+Be careful about exposing sensitive information in error messages. Always return generic error messages to clients and log detailed errors server-side.
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Keep Hooks Fast" icon="bolt">
+    Plugin hooks block the authentication flow. Keep them fast by:
+    - Using async operations efficiently
+    - Offloading heavy tasks to background jobs
+    - Caching frequently accessed data
+  </Card>
+  
+  <Card title="Handle Errors Gracefully" icon="shield-check">
+    Always handle errors in hooks:
+    - Use try-catch blocks
+    - Log errors for debugging
+    - Return user-friendly messages
+    - Don't expose sensitive data
+  </Card>
+  
+  <Card title="Test Thoroughly" icon="vial">
+    Test your plugins:
+    - Unit test each hook
+    - Test error scenarios
+    - Test hook execution order
+    - Test with multiple plugins
+  </Card>
+  
+  <Card title="Document Your Plugins" icon="book">
+    Make plugins maintainable:
+    - Document hook purposes
+    - List external dependencies
+    - Provide usage examples
+    - Version your plugins
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication Flows" icon="flow" href="/concepts/authentication-flows">
+    Learn where plugin hooks are called in each flow
+  </Card>
+  <Card title="Database Adapters" icon="database" href="/concepts/adapters">
+    Understand how to interact with the database in plugins
+  </Card>
+</CardGroup>

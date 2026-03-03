@@ -1,0 +1,300 @@
+---
+title: 'SMS Provider'
+description: 'Interface for implementing SMS providers for phone-based authentication in Arraf Auth'
+---
+
+## Overview
+
+The `SMSProvider` interface enables phone-based authentication by defining the contract for sending SMS messages. Implement this interface to integrate any SMS service provider with Arraf Auth.
+
+## Interface Definition
+
+The `SMSProvider` interface is defined in `@arraf-auth/core`:
+
+```typescript
+export interface SMSProvider {
+    send(params: SMSSendParams): Promise<SMSSendResult>
+}
+```
+
+## Method
+
+### send
+
+Sends an SMS message to the specified phone number.
+
+<ParamField path="params" type="SMSSendParams" required>
+  Parameters for sending the SMS message
+</ParamField>
+
+<ResponseField name="return" type="Promise<SMSSendResult>">
+  Promise resolving to the result of the SMS send operation
+</ResponseField>
+
+## Related Types
+
+### SMSSendParams
+
+```typescript
+export interface SMSSendParams {
+    to: string
+    message: string
+}
+```
+
+<ParamField path="to" type="string" required>
+  The recipient's phone number in E.164 format (e.g., "+966501234567")
+</ParamField>
+
+<ParamField path="message" type="string" required>
+  The SMS message content to send
+</ParamField>
+
+### SMSSendResult
+
+```typescript
+export interface SMSSendResult {
+    success: boolean
+    messageId?: string
+    error?: string
+}
+```
+
+<ResponseField name="success" type="boolean" required>
+  Whether the SMS was sent successfully
+</ResponseField>
+
+<ResponseField name="messageId" type="string">
+  Provider-specific message identifier for tracking
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message if the send operation failed
+</ResponseField>
+
+## Implementation Examples
+
+### Unifonic Provider (Saudi Arabia)
+
+```typescript
+import type { SMSProvider, SMSSendParams, SMSSendResult } from "@arraf-auth/core"
+
+export interface UnifonicConfig {
+    appSid: string
+}
+
+export function unifonic(config: UnifonicConfig): SMSProvider {
+    return {
+        async send(params: SMSSendParams): Promise<SMSSendResult> {
+            try {
+                const response = await fetch(
+                    "https://api.unifonic.com/rest/SMS/messages",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            AppSid: config.appSid,
+                            Recipient: params.to,
+                            Body: params.message,
+                        }),
+                    }
+                )
+
+                const data = await response.json()
+
+                if (data.success) {
+                    return {
+                        success: true,
+                        messageId: data.data?.MessageID,
+                    }
+                }
+
+                return {
+                    success: false,
+                    error: data.message || "Failed to send SMS",
+                }
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error instanceof Error ? error.message : "Unknown error",
+                }
+            }
+        },
+    }
+}
+```
+
+### Taqnyat Provider (Saudi Arabia)
+
+```typescript
+import type { SMSProvider, SMSSendParams, SMSSendResult } from "@arraf-auth/core"
+
+export interface TaqnyatConfig {
+    bearerToken: string
+    sender: string
+}
+
+export function taqnyat(config: TaqnyatConfig): SMSProvider {
+    return {
+        async send(params: SMSSendParams): Promise<SMSSendResult> {
+            try {
+                const response = await fetch(
+                    "https://api.taqnyat.sa/v1/messages",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${config.bearerToken}`,
+                        },
+                        body: JSON.stringify({
+                            recipients: [params.to],
+                            body: params.message,
+                            sender: config.sender,
+                        }),
+                    }
+                )
+
+                const data = await response.json()
+
+                if (response.ok && data.statusCode === 200) {
+                    return {
+                        success: true,
+                        messageId: data.messageId,
+                    }
+                }
+
+                return {
+                    success: false,
+                    error: data.message || "Failed to send SMS",
+                }
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error instanceof Error ? error.message : "Unknown error",
+                }
+            }
+        },
+    }
+}
+```
+
+### Msegat Provider (Saudi Arabia)
+
+```typescript
+import type { SMSProvider, SMSSendParams, SMSSendResult } from "@arraf-auth/core"
+
+export interface MsegatConfig {
+    userName: string
+    apiKey: string
+    userSender: string
+}
+
+export function msegat(config: MsegatConfig): SMSProvider {
+    return {
+        async send(params: SMSSendParams): Promise<SMSSendResult> {
+            try {
+                const response = await fetch(
+                    "https://www.msegat.com/gw/sendsms.php",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            userName: config.userName,
+                            apiKey: config.apiKey,
+                            numbers: params.to,
+                            userSender: config.userSender,
+                            msg: params.message,
+                            msgEncoding: "UTF8",
+                        }),
+                    }
+                )
+
+                const data = await response.json()
+
+                if (data.code === "1") {
+                    return {
+                        success: true,
+                        messageId: data.messageID,
+                    }
+                }
+
+                return {
+                    success: false,
+                    error: data.message || "Failed to send SMS",
+                }
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error instanceof Error ? error.message : "Unknown error",
+                }
+            }
+        },
+    }
+}
+```
+
+## Usage
+
+Add your SMS provider to the Arraf Auth configuration:
+
+<CodeGroup>
+
+```typescript Unifonic
+import { ArrafAuth } from "@arraf-auth/core"
+import { unifonic } from "./providers/unifonic"
+
+const auth = new ArrafAuth({
+    secret: process.env.AUTH_SECRET,
+    database: adapter,
+    sms: unifonic({
+        appSid: process.env.UNIFONIC_APP_SID!,
+    }),
+})
+```
+
+```typescript Taqnyat
+import { ArrafAuth } from "@arraf-auth/core"
+import { taqnyat } from "./providers/taqnyat"
+
+const auth = new ArrafAuth({
+    secret: process.env.AUTH_SECRET,
+    database: adapter,
+    sms: taqnyat({
+        bearerToken: process.env.TAQNYAT_BEARER_TOKEN!,
+        sender: "YourApp",
+    }),
+})
+```
+
+```typescript Msegat
+import { ArrafAuth } from "@arraf-auth/core"
+import { msegat } from "./providers/msegat"
+
+const auth = new ArrafAuth({
+    secret: process.env.AUTH_SECRET,
+    database: adapter,
+    sms: msegat({
+        userName: process.env.MSEGAT_USERNAME!,
+        apiKey: process.env.MSEGAT_API_KEY!,
+        userSender: "YourApp",
+    }),
+})
+```
+
+</CodeGroup>
+
+<Note>
+  Always handle SMS sending errors gracefully and provide clear error messages to users. Most providers have rate limits and delivery constraints.
+</Note>
+
+## Best Practices
+
+1. **Error Handling**: Always wrap API calls in try-catch blocks and return appropriate error messages
+2. **Phone Format**: Ensure phone numbers are in E.164 format before sending
+3. **Message Length**: Be mindful of SMS character limits (typically 160 characters for GSM-7)
+4. **Rate Limiting**: Implement rate limiting to prevent abuse and control costs
+5. **Testing**: Use provider sandbox environments for development and testing

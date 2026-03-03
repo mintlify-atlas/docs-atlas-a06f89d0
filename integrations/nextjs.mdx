@@ -1,0 +1,319 @@
+---
+title: Next.js Integration
+description: Integrate Arraf Auth with Next.js App Router and Pages Router
+---
+
+Integrate Arraf Auth with your Next.js application. This guide covers both App Router and Pages Router.
+
+## Installation
+
+```bash
+npm install @arraf-auth/nextjs
+```
+
+## Setup
+
+<Steps>
+
+### Configure Auth Instance
+
+First, create your auth configuration:
+
+```typescript lib/auth.ts
+import { createAuth } from "@arraf-auth/core"
+
+export const auth = createAuth({
+  // Your auth configuration
+})
+```
+
+### Create API Route Handler
+
+<Tabs>
+  <Tab title="App Router">
+    Create an API route at `app/api/auth/[...all]/route.ts`:
+
+    ```typescript app/api/auth/[...all]/route.ts
+    import { toNextHandlers } from "@arraf-auth/nextjs"
+    import { auth } from "@/lib/auth"
+
+    export const { GET, POST } = toNextHandlers(auth)
+    ```
+
+    The `toNextHandlers` function automatically remaps `/api/auth` paths to `/auth` for the handler.
+  </Tab>
+
+  <Tab title="Pages Router">
+    Create an API route at `pages/api/auth/[...all].ts`:
+
+    ```typescript pages/api/auth/[...all].ts
+    import type { NextApiRequest, NextApiResponse } from "next"
+    import { toNextHandlers } from "@arraf-auth/nextjs"
+    import { auth } from "@/lib/auth"
+
+    const handlers = toNextHandlers(auth)
+
+    export default async function handler(
+      req: NextApiRequest,
+      res: NextApiResponse
+    ) {
+      const request = new Request(
+        `${req.headers.host}${req.url}`,
+        {
+          method: req.method,
+          headers: req.headers as HeadersInit,
+          body: req.method !== "GET" ? JSON.stringify(req.body) : undefined,
+        }
+      )
+
+      const handler = handlers[req.method as "GET" | "POST"]
+      if (!handler) {
+        return res.status(405).json({ error: "Method not allowed" })
+      }
+
+      const response = await handler(request)
+      const data = await response.json()
+
+      response.headers.forEach((value, key) => {
+        if (key.toLowerCase() === "set-cookie") {
+          res.setHeader(key, value)
+        }
+      })
+
+      return res.status(response.status).json(data)
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Set Up Middleware for Protected Routes
+
+Create `middleware.ts` at the root of your project:
+
+```typescript middleware.ts
+import { createAuthMiddleware, defaultMatcher } from "@arraf-auth/nextjs/middleware"
+import { auth } from "@/lib/auth"
+
+export default createAuthMiddleware({
+  auth,
+  protectedRoutes: ["/dashboard", "/profile", "/settings"],
+  publicRoutes: ["/", "/login", "/signup"],
+  redirectTo: "/login",
+})
+
+export const config = defaultMatcher
+```
+
+<Note>
+The middleware automatically:
+- Protects specified routes
+- Redirects unauthenticated users to login
+- Adds callback URL for post-login redirect
+- Sets user info in response headers (`x-user-id`, `x-user-email`)
+</Note>
+
+### Middleware Configuration Options
+
+- `auth` - Your auth instance (required)
+- `protectedRoutes` - Array of route patterns to protect (empty array = protect all)
+- `publicRoutes` - Array of routes that don't require authentication
+- `redirectTo` - Where to redirect unauthenticated users (default: `/login`)
+- `afterLoginRedirect` - Where to redirect after successful login
+
+</Steps>
+
+## Accessing Session Data
+
+### Server-Side (App Router)
+
+Access session data in Server Components and Server Actions:
+
+```typescript app/dashboard/page.tsx
+import { getSession } from "@arraf-auth/nextjs"
+import { auth } from "@/lib/auth"
+
+export default async function DashboardPage() {
+  const session = await getSession(auth)
+
+  if (!session) {
+    return <div>Not authenticated</div>
+  }
+
+  return (
+    <div>
+      <h1>Welcome {session.user.name}</h1>
+      <p>Email: {session.user.email}</p>
+    </div>
+  )
+}
+```
+
+<Note>
+When called without a `Request` object, `getSession` automatically retrieves cookies from Next.js headers.
+</Note>
+
+### API Routes (App Router)
+
+Access session in API route handlers:
+
+```typescript app/api/profile/route.ts
+import { NextRequest } from "next/server"
+import { getSession } from "@arraf-auth/nextjs"
+import { auth } from "@/lib/auth"
+
+export async function GET(req: NextRequest) {
+  const session = await getSession(auth, req)
+
+  if (!session) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  return Response.json({
+    user: session.user,
+  })
+}
+```
+
+### Client-Side
+
+Create a client component to fetch session data:
+
+```typescript app/components/user-info.tsx
+"use client"
+
+import { useEffect, useState } from "react"
+
+export function UserInfo() {
+  const [user, setUser] = useState(null)
+
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((data) => setUser(data.user))
+  }, [])
+
+  if (!user) return <div>Loading...</div>
+
+  return <div>Logged in as {user.email}</div>
+}
+```
+
+## Route Protection Patterns
+
+### Protect All Routes Except Public
+
+```typescript middleware.ts
+export default createAuthMiddleware({
+  auth,
+  publicRoutes: ["/", "/login", "/signup", "/about"],
+  redirectTo: "/login",
+})
+```
+
+### Protect Specific Routes Only
+
+```typescript middleware.ts
+export default createAuthMiddleware({
+  auth,
+  protectedRoutes: ["/dashboard", "/admin"],
+  redirectTo: "/login",
+})
+```
+
+<Warning>
+If `protectedRoutes` is an empty array, ALL routes (except `publicRoutes`) will be protected.
+</Warning>
+
+## Advanced Usage
+
+### Custom Middleware Logic
+
+Extend the middleware with custom logic:
+
+```typescript middleware.ts
+import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
+import { auth } from "@/lib/auth"
+
+export async function middleware(req: NextRequest) {
+  const session = await auth.getSession(req)
+
+  // Custom role-based protection
+  if (req.nextUrl.pathname.startsWith("/admin")) {
+    if (!session?.user?.role || session.user.role !== "admin") {
+      return NextResponse.redirect(new URL("/unauthorized", req.url))
+    }
+  }
+
+  return NextResponse.next()
+}
+```
+
+### Server Actions
+
+Access session in Server Actions:
+
+```typescript app/actions.ts
+"use server"
+
+import { getSession } from "@arraf-auth/nextjs"
+import { auth } from "@/lib/auth"
+
+export async function updateProfile(formData: FormData) {
+  const session = await getSession(auth)
+
+  if (!session) {
+    throw new Error("Unauthorized")
+  }
+
+  // Update profile logic
+}
+```
+
+## TypeScript Types
+
+```typescript
+interface ArrafAuthConfig {
+  auth: {
+    handler: (req: Request) => Promise<Response>
+    getSession: (req: Request) => Promise<{ user: any; session: any } | null>
+  }
+}
+
+interface MiddlewareConfig {
+  auth: ArrafAuthConfig["auth"]
+  protectedRoutes?: string[]
+  publicRoutes?: string[]
+  redirectTo?: string
+  afterLoginRedirect?: string
+}
+```
+
+## Troubleshooting
+
+### Middleware Not Running
+
+Make sure your `matcher` config is set correctly:
+
+```typescript middleware.ts
+export const config = {
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.png$).*)",
+  ],
+}
+```
+
+### Session Not Persisting
+
+Ensure cookies are being set correctly. Check:
+- Your auth handler is returning proper `Set-Cookie` headers
+- Cookie domain matches your application domain
+- Secure flag is appropriate for your environment
+
+### Type Errors with getSession
+
+If you get type errors with `getSession`, make sure you're importing from the correct package:
+
+```typescript
+import { getSession } from "@arraf-auth/nextjs"
+```

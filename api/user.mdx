@@ -1,0 +1,71 @@
+---
+title: User
+description: The User type represents an authenticated user in Arraf Auth
+---
+
+## User Interface
+
+The `User` interface represents an authenticated user account in Arraf Auth. It contains all the core user profile information and verification status.
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the user
+</ResponseField>
+
+<ResponseField name="email" type="string | null">
+  The user's email address. Can be `null` if the user authenticated via phone only.
+</ResponseField>
+
+<ResponseField name="phone" type="string | null">
+  The user's phone number. Can be `null` if the user authenticated via email only.
+</ResponseField>
+
+<ResponseField name="name" type="string | null">
+  The user's display name. Can be `null` if not provided.
+</ResponseField>
+
+<ResponseField name="emailVerified" type="boolean" required>
+  Indicates whether the user's email address has been verified
+</ResponseField>
+
+<ResponseField name="phoneVerified" type="boolean" required>
+  Indicates whether the user's phone number has been verified
+</ResponseField>
+
+<ResponseField name="image" type="string | null">
+  URL to the user's profile image. Can be `null` if not set.
+</ResponseField>
+
+<ResponseField name="createdAt" type="Date" required>
+  Timestamp when the user account was created
+</ResponseField>
+
+<ResponseField name="updatedAt" type="Date" required>
+  Timestamp when the user account was last updated
+</ResponseField>
+
+## Usage Example
+
+```typescript
+import { User } from "arraf-auth"
+
+// Get current user from session
+const user: User = await auth.getUser(sessionToken)
+
+console.log(user.id) // "user_123"
+console.log(user.email) // "user@example.com"
+console.log(user.emailVerified) // true
+
+// Update user profile
+const updatedUser = await auth.updateUser(user.id, {
+  name: "John Doe",
+  image: "https://example.com/avatar.jpg"
+})
+```
+
+<Note>
+  Users can authenticate with email, phone, or OAuth providers. At least one of `email` or `phone` will be set, but not necessarily both.
+</Note>
+
+<Info>
+  The `emailVerified` and `phoneVerified` fields are automatically set to `true` when users verify their contact information via OTP or when authenticating through OAuth providers that provide verified email addresses.
+</Info>

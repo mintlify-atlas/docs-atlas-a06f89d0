@@ -1,0 +1,70 @@
+---
+title: Session
+description: The Session type represents an authenticated user session
+---
+
+## Session Interface
+
+The `Session` interface represents an active user session in Arraf Auth. Sessions are created when users sign in and are used to maintain authentication state.
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the session
+</ResponseField>
+
+<ResponseField name="userId" type="string" required>
+  The ID of the user this session belongs to. References `User.id`.
+</ResponseField>
+
+<ResponseField name="token" type="string" required>
+  The session token used for authentication. This is the value stored in cookies or passed in Authorization headers.
+</ResponseField>
+
+<ResponseField name="expiresAt" type="Date" required>
+  Timestamp when the session expires. After this time, the session is no longer valid.
+</ResponseField>
+
+<ResponseField name="ipAddress" type="string" optional>
+  The IP address from which the session was created. Useful for security auditing.
+</ResponseField>
+
+<ResponseField name="userAgent" type="string" optional>
+  The user agent (browser/device information) from which the session was created.
+</ResponseField>
+
+<ResponseField name="createdAt" type="Date" required>
+  Timestamp when the session was created
+</ResponseField>
+
+## Usage Example
+
+```typescript
+import { Session } from "arraf-auth"
+
+// Create a new session
+const session: Session = await auth.createSession({
+  userId: "user_123",
+  token: "session_token_abc",
+  expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+  ipAddress: "192.168.1.1",
+  userAgent: "Mozilla/5.0..."
+})
+
+// Verify and get session
+const activeSession = await auth.getSession("session_token_abc")
+
+if (activeSession && activeSession.expiresAt > new Date()) {
+  console.log("Session is valid")
+  console.log("User ID:", activeSession.userId)
+}
+
+// Delete session (sign out)
+await auth.deleteSession(session.token)
+```
+
+<Note>
+  Session tokens should be treated as sensitive credentials. Store them securely in httpOnly cookies or secure storage.
+</Note>
+
+<Info>
+  The session expiration time is configured in the `AuthConfig.session.expiresIn` setting. Sessions can use either database or JWT strategy depending on your configuration.
+</Info>

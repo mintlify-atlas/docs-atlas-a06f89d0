@@ -1,0 +1,111 @@
+---
+title: Phone Utilities
+description: Utility functions for phone number normalization and formatting
+---
+
+# Phone Utilities
+
+Utility functions for validating, normalizing, and formatting phone numbers with support for Saudi Arabian phone number formats.
+
+## normalizePhone
+
+Normalizes and validates phone numbers to E.164 format. Handles Saudi Arabian phone numbers with special logic for local formats.
+
+```typescript
+function normalizePhone(input: string): PhoneValidationResult
+```
+
+### Parameters
+
+<ParamField path="input" type="string" required>
+  The phone number string to normalize. Can contain spaces, dashes, and parentheses.
+</ParamField>
+
+### Returns
+
+<ResponseField name="valid" type="boolean" required>
+  Whether the phone number is valid
+</ResponseField>
+
+<ResponseField name="normalized" type="string">
+  The normalized phone number in E.164 format (e.g., +966512345678). Only present if valid is true.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message if validation failed. Only present if valid is false.
+</ResponseField>
+
+### Behavior
+
+- Removes spaces, dashes, and parentheses from input
+- Converts Saudi local format (05XXXXXXXX) to international format (+9665XXXXXXXX)
+- Handles 00966 prefix and converts to +966
+- Validates against E.164 format (7-15 digits after country code)
+
+### Examples
+
+```typescript
+// Saudi local format
+const result1 = normalizePhone("0512345678")
+// { valid: true, normalized: "+966512345678" }
+
+// International format
+const result2 = normalizePhone("+966 51 234 5678")
+// { valid: true, normalized: "+966512345678" }
+
+// With 00 prefix
+const result3 = normalizePhone("00966512345678")
+// { valid: true, normalized: "+966512345678" }
+
+// Invalid format
+const result4 = normalizePhone("123")
+// { valid: false, error: "Invalid phone number format" }
+```
+
+<Note>
+  The function specifically handles Saudi Arabian phone numbers (country code +966) with special normalization logic for local formats starting with 05.
+</Note>
+
+## formatPhoneForDisplay
+
+Formats a phone number for display purposes. Currently supports Saudi Arabian numbers with local format display.
+
+```typescript
+function formatPhoneForDisplay(phone: string): string
+```
+
+### Parameters
+
+<ParamField path="phone" type="string" required>
+  The phone number in E.164 format (e.g., +966512345678)
+</ParamField>
+
+### Returns
+
+Returns the formatted phone number string. For Saudi numbers, converts to local format with spaces (e.g., "0512 345 678"). For other numbers, returns the original input.
+
+### Examples
+
+```typescript
+// Saudi number
+const display1 = formatPhoneForDisplay("+966512345678")
+// "0512 345 678"
+
+// Non-Saudi number (returned as-is)
+const display2 = formatPhoneForDisplay("+12025551234")
+// "+12025551234"
+```
+
+<Note>
+  This function is useful for displaying phone numbers in a user-friendly format. It converts Saudi international format back to the familiar local format with spacing.
+</Note>
+
+## TypeScript Interface
+
+```typescript
+export interface PhoneValidationResult {
+  valid: boolean
+  normalized?: string
+  error?: string
+}
+```

@@ -1,0 +1,412 @@
+---
+title: Installation
+description: Complete installation guide for Arraf Auth packages, prerequisites, and setup requirements
+---
+
+# Installation
+
+This guide covers everything you need to install and configure Arraf Auth in your project.
+
+## Prerequisites
+
+Before installing Arraf Auth, ensure you have:
+
+- **Node.js** 18.0 or higher
+- **TypeScript** 5.0 or higher (recommended)
+- A supported **database** (PostgreSQL, MySQL, SQLite, etc.)
+- An **SMS provider** account (for phone OTP authentication)
+
+<Note>
+  While TypeScript is recommended for the best experience, Arraf Auth also works with JavaScript.
+</Note>
+
+## Core Package
+
+The core package is framework-agnostic and provides all authentication logic:
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/core
+```
+
+```bash yarn
+yarn add @arraf-auth/core
+```
+
+```bash pnpm
+pnpm add @arraf-auth/core
+```
+</CodeGroup>
+
+## Database Adapters
+
+Choose a database adapter based on your ORM:
+
+### Prisma Adapter
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/adapter-prisma @prisma/client
+npm install -D prisma
+```
+
+```bash yarn
+yarn add @arraf-auth/adapter-prisma @prisma/client
+yarn add -D prisma
+```
+
+```bash pnpm
+pnpm add @arraf-auth/adapter-prisma @prisma/client
+pnpm add -D prisma
+```
+</CodeGroup>
+
+The Prisma adapter requires Prisma Client and includes automatic schema generation.
+
+### Drizzle Adapter
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/adapter-drizzle drizzle-orm
+```
+
+```bash yarn
+yarn add @arraf-auth/adapter-drizzle drizzle-orm
+```
+
+```bash pnpm
+pnpm add @arraf-auth/adapter-drizzle drizzle-orm
+```
+</CodeGroup>
+
+The Drizzle adapter works with any Drizzle-supported database driver.
+
+<Info>
+  Don't see your ORM? You can easily create a custom adapter by implementing the `DatabaseAdapter` interface. See the [Database Adapter API reference](/api/database-adapter) for details.
+</Info>
+
+## Framework Integrations
+
+Install the integration package for your framework:
+
+### Next.js
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/nextjs
+```
+
+```bash yarn
+yarn add @arraf-auth/nextjs
+```
+
+```bash pnpm
+pnpm add @arraf-auth/nextjs
+```
+</CodeGroup>
+
+Supports both **App Router** and **Pages Router**.
+
+### Express
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/express
+```
+
+```bash yarn
+yarn add @arraf-auth/express
+```
+
+```bash pnpm
+pnpm add @arraf-auth/express
+```
+</CodeGroup>
+
+Works with Express 4.x and 5.x.
+
+### Hono
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/hono
+```
+
+```bash yarn
+yarn add @arraf-auth/hono
+```
+
+```bash pnpm
+pnpm add @arraf-auth/hono
+```
+</CodeGroup>
+
+Compatible with Hono on Node.js, Cloudflare Workers, and other edge runtimes.
+
+## OAuth Providers
+
+Install providers for OAuth authentication:
+
+### Google OAuth
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/provider-google
+```
+
+```bash yarn
+yarn add @arraf-auth/provider-google
+```
+
+```bash pnpm
+pnpm add @arraf-auth/provider-google
+```
+</CodeGroup>
+
+### GitHub OAuth
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/provider-github
+```
+
+```bash yarn
+yarn add @arraf-auth/provider-github
+```
+
+```bash pnpm
+pnpm add @arraf-auth/provider-github
+```
+</CodeGroup>
+
+### Twitter OAuth
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/provider-twitter
+```
+
+```bash yarn
+yarn add @arraf-auth/provider-twitter
+```
+
+```bash pnpm
+pnpm add @arraf-auth/provider-twitter
+```
+</CodeGroup>
+
+<Tip>
+  You can also create custom OAuth providers by implementing the `OAuthProvider` interface. See the [OAuth Provider API reference](/api/oauth-provider) for details.
+</Tip>
+
+## Complete Installation Example
+
+Here's a typical installation for a **Next.js project with Prisma**:
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/core @arraf-auth/adapter-prisma @arraf-auth/nextjs
+npm install @prisma/client
+npm install -D prisma
+
+# Optional: OAuth providers
+npm install @arraf-auth/provider-google @arraf-auth/provider-github
+```
+
+```bash yarn
+yarn add @arraf-auth/core @arraf-auth/adapter-prisma @arraf-auth/nextjs
+yarn add @prisma/client
+yarn add -D prisma
+
+# Optional: OAuth providers
+yarn add @arraf-auth/provider-google @arraf-auth/provider-github
+```
+
+```bash pnpm
+pnpm add @arraf-auth/core @arraf-auth/adapter-prisma @arraf-auth/nextjs
+pnpm add @prisma/client
+pnpm add -D prisma
+
+# Optional: OAuth providers
+pnpm add @arraf-auth/provider-google @arraf-auth/provider-github
+```
+</CodeGroup>
+
+## Environment Variables
+
+Create a `.env` file with the following required variables:
+
+```bash .env
+# Required: Secret key for signing tokens and sessions
+AUTH_SECRET="your-secret-key-here"
+
+# Database connection (example for PostgreSQL)
+DATABASE_URL="postgresql://user:password@localhost:5432/mydb"
+
+# Optional: OAuth provider credentials
+GOOGLE_CLIENT_ID="your-google-client-id"
+GOOGLE_CLIENT_SECRET="your-google-client-secret"
+
+GITHUB_CLIENT_ID="your-github-client-id"
+GITHUB_CLIENT_SECRET="your-github-client-secret"
+
+# Optional: SMS provider credentials
+UNIFONIC_APP_SID="your-unifonic-app-sid"
+UNIFONIC_SENDER_ID="your-sender-id"
+```
+
+<Warning>
+  **Never commit your `.env` file to version control.** Add it to `.gitignore` to keep your secrets safe.
+</Warning>
+
+Generate a secure random secret for `AUTH_SECRET`:
+
+```bash
+openssl rand -base64 32
+```
+
+## Database Setup
+
+After installing your database adapter, you need to set up the database schema.
+
+### With Prisma
+
+1. Initialize Prisma (if not already done):
+
+```bash
+npx prisma init
+```
+
+2. Add the Arraf Auth schema to `prisma/schema.prisma`
+3. Push to your database:
+
+```bash
+npx prisma db push
+```
+
+4. Generate the Prisma Client:
+
+```bash
+npx prisma generate
+```
+
+### With Drizzle
+
+1. Create your schema file with Arraf Auth tables
+2. Generate and run migrations:
+
+```bash
+npx drizzle-kit generate
+npx drizzle-kit migrate
+```
+
+<Card title="Database Setup Guide" icon="database" href="/guides/database-setup">
+  See the complete database setup guide for detailed schema definitions and migration instructions.
+</Card>
+
+## Verify Installation
+
+Create a test file to verify your installation:
+
+```typescript test-auth.ts
+import { createAuth } from "@arraf-auth/core"
+import { prismaAdapter } from "@arraf-auth/adapter-prisma"
+import { PrismaClient } from "@prisma/client"
+
+const prisma = new PrismaClient()
+
+const auth = createAuth({
+  secret: "test-secret",
+  database: prismaAdapter(prisma),
+  sms: {
+    send: async ({ to, message }) => {
+      console.log(`Would send SMS to ${to}: ${message}`)
+      return { success: true }
+    }
+  }
+})
+
+console.log("✓ Arraf Auth configured successfully!")
+console.log("✓ Database adapter:", typeof auth.$context.adapter)
+console.log("✓ Session manager:", typeof auth.$context.sessionManager)
+```
+
+Run it:
+
+```bash
+npx tsx test-auth.ts
+```
+
+You should see success messages confirming the installation.
+
+## Package Overview
+
+Here's a quick reference of all available packages:
+
+| Package | Description | Version |
+|---------|-------------|----------|
+| `@arraf-auth/core` | Framework-agnostic authentication engine | [![npm](https://img.shields.io/npm/v/@arraf-auth/core)](https://www.npmjs.com/package/@arraf-auth/core) |
+| `@arraf-auth/adapter-prisma` | Prisma ORM database adapter | [![npm](https://img.shields.io/npm/v/@arraf-auth/adapter-prisma)](https://www.npmjs.com/package/@arraf-auth/adapter-prisma) |
+| `@arraf-auth/adapter-drizzle` | Drizzle ORM database adapter | [![npm](https://img.shields.io/npm/v/@arraf-auth/adapter-drizzle)](https://www.npmjs.com/package/@arraf-auth/adapter-drizzle) |
+| `@arraf-auth/nextjs` | Next.js App Router & Pages Router integration | [![npm](https://img.shields.io/npm/v/@arraf-auth/nextjs)](https://www.npmjs.com/package/@arraf-auth/nextjs) |
+| `@arraf-auth/express` | Express.js middleware integration | [![npm](https://img.shields.io/npm/v/@arraf-auth/express)](https://www.npmjs.com/package/@arraf-auth/express) |
+| `@arraf-auth/hono` | Hono framework integration | [![npm](https://img.shields.io/npm/v/@arraf-auth/hono)](https://www.npmjs.com/package/@arraf-auth/hono) |
+| `@arraf-auth/provider-google` | Google OAuth provider | [![npm](https://img.shields.io/npm/v/@arraf-auth/provider-google)](https://www.npmjs.com/package/@arraf-auth/provider-google) |
+| `@arraf-auth/provider-github` | GitHub OAuth provider | [![npm](https://img.shields.io/npm/v/@arraf-auth/provider-github)](https://www.npmjs.com/package/@arraf-auth/provider-github) |
+| `@arraf-auth/provider-twitter` | Twitter/X OAuth provider | [![npm](https://img.shields.io/npm/v/@arraf-auth/provider-twitter)](https://www.npmjs.com/package/@arraf-auth/provider-twitter) |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get a working auth system in 5 minutes
+  </Card>
+  
+  <Card title="Database Setup" icon="database" href="/guides/database-setup">
+    Configure your database schema and migrations
+  </Card>
+  
+  <Card title="Phone + OTP" icon="mobile-screen" href="/guides/phone-otp">
+    Set up phone authentication with SMS providers
+  </Card>
+  
+  <Card title="Framework Guides" icon="book" href="/guides/frameworks">
+    Integration guides for Next.js, Express, and Hono
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### TypeScript Errors
+
+If you see TypeScript errors, ensure you have TypeScript 5.0 or higher:
+
+```bash
+npm install -D typescript@latest
+```
+
+### Prisma Generation Errors
+
+If Prisma Client is not generating, run:
+
+```bash
+npx prisma generate
+```
+
+### Module Resolution Issues
+
+For Next.js projects, ensure your `tsconfig.json` has the correct module resolution:
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "target": "ES2020"
+  }
+}
+```
+
+<Info>
+  Still having issues? [Open an issue on GitHub](https://github.com/arrafauth/arraf-auth/issues) for support.
+</Info>

@@ -1,0 +1,234 @@
+---
+title: 'Google Provider'
+description: 'Official Google OAuth 2.0 provider for Arraf Auth'
+---
+
+## Overview
+
+The Google provider enables authentication using Google accounts. It implements the OAuth 2.0 protocol and supports PKCE for enhanced security.
+
+## Installation
+
+```bash
+npm install @arraf-auth/google
+```
+
+## Setup
+
+### 1. Create OAuth Credentials
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Navigate to **APIs & Services** > **Credentials**
+4. Click **Create Credentials** > **OAuth client ID**
+5. Select **Web application**
+6. Add your authorized redirect URIs:
+   - Development: `http://localhost:3000/api/auth/callback/google`
+   - Production: `https://yourdomain.com/api/auth/callback/google`
+7. Save your **Client ID** and **Client Secret**
+
+### 2. Configure Environment Variables
+
+```bash
+GOOGLE_CLIENT_ID=your_client_id_here
+GOOGLE_CLIENT_SECRET=your_client_secret_here
+```
+
+## Configuration
+
+```typescript
+import { google } from "@arraf-auth/google"
+```
+
+### GoogleProviderConfig
+
+<ParamField path="clientId" type="string" required>
+  OAuth 2.0 client ID from Google Cloud Console
+</ParamField>
+
+<ParamField path="clientSecret" type="string" required>
+  OAuth 2.0 client secret from Google Cloud Console
+</ParamField>
+
+<ParamField path="redirectUri" type="string" required>
+  The callback URL where users will be redirected after authentication
+</ParamField>
+
+<ParamField path="scopes" type="string[]">
+  OAuth scopes to request. Defaults to `["openid", "email", "profile"]`
+</ParamField>
+
+## Usage
+
+<CodeGroup>
+
+```typescript Next.js
+import { ArrafAuth } from "@arraf-auth/core"
+import { google } from "@arraf-auth/google"
+import { adapter } from "./db"
+
+const auth = new ArrafAuth({
+    secret: process.env.AUTH_SECRET!,
+    database: adapter,
+    providers: [
+        google({
+            clientId: process.env.GOOGLE_CLIENT_ID!,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+            redirectUri: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback/google`,
+        }),
+    ],
+})
+
+export default auth
+```
+
+```typescript Express
+import { ArrafAuth } from "@arraf-auth/core"
+import { google } from "@arraf-auth/google"
+import { adapter } from "./db"
+
+const auth = new ArrafAuth({
+    secret: process.env.AUTH_SECRET!,
+    database: adapter,
+    providers: [
+        google({
+            clientId: process.env.GOOGLE_CLIENT_ID!,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+            redirectUri: "http://localhost:3000/auth/callback/google",
+        }),
+    ],
+})
+
+export { auth }
+```
+
+</CodeGroup>
+
+## Custom Scopes
+
+Request additional permissions from Google:
+
+```typescript
+google({
+    clientId: process.env.GOOGLE_CLIENT_ID!,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    redirectUri: "https://yourdomain.com/api/auth/callback/google",
+    scopes: [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/calendar.readonly",
+    ],
+})
+```
+
+### Available Scopes
+
+- `openid` - OpenID Connect authentication
+- `email` - User's email address
+- `profile` - User's basic profile information
+- `https://www.googleapis.com/auth/calendar.readonly` - Read-only calendar access
+- `https://www.googleapis.com/auth/drive.readonly` - Read-only Drive access
+
+See [Google OAuth Scopes](https://developers.google.com/identity/protocols/oauth2/scopes) for a complete list.
+
+## Implementation Details
+
+The Google provider is implemented in `/home/daytona/workspace/source/packages/providers/google/src/index.ts:1`:
+
+```typescript
+export function google(config: GoogleProviderConfig): OAuthProvider {
+    const scopes = config.scopes ?? [
+        "openid",
+        "email",
+        "profile",
+    ]
+
+    return {
+        id: "google",
+        name: "Google",
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        scopes,
+
+        getAuthorizationUrl(state: string, codeVerifier?: string) {
+            const params: Record<string, string> = {
+                client_id: config.clientId,
+                redirect_uri: config.redirectUri,
+                response_type: "code",
+                scope: scopes.join(" "),
+                state,
+                access_type: "offline",
+                prompt: "consent",
+            }
+
+            if (codeVerifier) {
+                params.code_challenge_method = "S256"
+            }
+
+            return buildAuthorizationUrl(
+                "https://accounts.google.com/o/oauth2/v2/auth",
+                params
+            )
+        },
+
+        async exchangeCode(code: string, codeVerifier?: string) {
+            // Token exchange implementation
+        },
+
+        async getUserProfile(accessToken: string) {
+            // User profile fetching implementation
+        },
+    }
+}
+```
+
+## User Profile
+
+The provider returns the following user profile data:
+
+<ResponseField name="id" type="string">
+  Google user ID (from `sub` claim)
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  User's email address
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  User's full name
+</ResponseField>
+
+<ResponseField name="image" type="string">
+  URL to user's profile picture
+</ResponseField>
+
+<ResponseField name="emailVerified" type="boolean">
+  Whether the email has been verified by Google
+</ResponseField>
+
+## Features
+
+- Full OAuth 2.0 implementation
+- PKCE support for enhanced security
+- Automatic token refresh with `access_type: "offline"`
+- Email verification status from Google
+- Profile picture retrieval
+
+<Note>
+  The provider automatically requests `access_type: "offline"` and `prompt: "consent"` to ensure a refresh token is always returned.
+</Note>
+
+## Troubleshooting
+
+### Redirect URI Mismatch
+
+Ensure the redirect URI in your code exactly matches one configured in Google Cloud Console, including the protocol (http/https) and trailing slashes.
+
+### Missing Email
+
+If the email is not returned, verify that the `email` scope is included in your configuration.
+
+### Invalid Client Error
+
+Double-check that your `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` environment variables are correctly set.

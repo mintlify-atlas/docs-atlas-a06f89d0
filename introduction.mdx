@@ -1,0 +1,143 @@
+---
+title: Introduction to Arraf Auth
+description: TypeScript-first authentication library built for the Saudi Arabia market with phone + OTP, OAuth, and email/password support
+---
+
+# Welcome to Arraf Auth
+
+Arraf Auth is a **TypeScript-first authentication library** specifically designed for the **Saudi Arabia market**. It provides a modern, flexible authentication solution with first-class support for phone + OTP authentication, alongside traditional email/password and OAuth flows.
+
+## Why Arraf Auth?
+
+Built from the ground up for Middle Eastern developers, Arraf Auth recognizes that **phone-based authentication is the primary authentication method** in Saudi Arabia and the broader GCC region. Unlike generic authentication libraries that treat phone authentication as an afterthought, Arraf Auth makes it a first-class citizen.
+
+<CardGroup cols={2}>
+  <Card title="Phone + OTP First" icon="mobile">
+    Built specifically for the Saudi market where phone numbers are the primary authentication method. Seamlessly integrate with local SMS providers like Unifonic, Taqnyat, and Msegat.
+  </Card>
+  
+  <Card title="TypeScript Native" icon="code">
+    Fully typed from the ground up. Catch errors at compile time and enjoy excellent autocomplete support across your entire authentication flow.
+  </Card>
+  
+  <Card title="Framework Agnostic" icon="puzzle-piece">
+    Core library works with any JavaScript framework. Official integrations available for Next.js, Express, and Hono. Build your own adapter in minutes.
+  </Card>
+  
+  <Card title="Plugin Architecture" icon="plug">
+    Extend functionality with plugins. Add custom routes, hooks into authentication events, and integrate with your existing systems.
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Multiple Authentication Methods
+
+- **Phone + OTP** - Primary authentication method optimized for the Saudi market
+- **Email + Password** - Traditional authentication with secure password hashing
+- **OAuth** - Support for Google, GitHub, Twitter, and custom providers
+
+### Flexible Database Adapters
+
+- **Prisma** - Type-safe ORM with excellent DX
+- **Drizzle** - Lightweight SQL toolkit
+- Easily build custom adapters for any database
+
+### Framework Integrations
+
+- **Next.js** - App Router and Pages Router support
+- **Express** - Traditional Node.js applications
+- **Hono** - Modern edge-compatible framework
+
+### Developer Experience
+
+- Full TypeScript support with comprehensive types
+- Plugin system for extensibility
+- Session management (JWT or database-backed)
+- Secure by default with configurable options
+
+## Architecture Overview
+
+Arraf Auth follows a modular architecture that separates concerns and allows you to pick exactly what you need:
+
+```
+@arraf-auth/core          → Framework-agnostic auth engine
+    ↓
+    ├─ Adapters          → Database layer (Prisma, Drizzle)
+    ├─ Providers         → OAuth providers (Google, GitHub, Twitter)
+    └─ Integrations      → Framework bindings (Next.js, Express, Hono)
+```
+
+The core package handles all authentication logic, while adapters connect to your database, providers handle OAuth flows, and integrations bind everything to your framework of choice.
+
+## Saudi Market Focus
+
+Arraf Auth is purpose-built for the Saudi Arabia market:
+
+- **Phone numbers as primary identifiers** - Most users authenticate with their phone number
+- **OTP via SMS** - Seamless integration with regional SMS providers
+- **Local provider support** - Easy integration with Unifonic, Taqnyat, Msegat, and other Saudi SMS gateways
+- **Arabic language support** - Configurable message templates for Arabic OTP messages
+
+## Quick Example
+
+Here's a complete authentication setup in just a few lines:
+
+```typescript
+import { createAuth } from "@arraf-auth/core"
+import { prismaAdapter } from "@arraf-auth/adapter-prisma"
+import { prisma } from "./lib/prisma"
+
+export const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: prismaAdapter(prisma),
+  
+  // Configure SMS for phone OTP
+  sms: {
+    send: async ({ to, message }) => {
+      // Integrate with your SMS provider
+      // Unifonic, Taqnyat, Msegat, etc.
+      return { success: true }
+    }
+  },
+  
+  // Optional: Configure OTP behavior
+  otp: {
+    length: 6,
+    expiresIn: 300, // 5 minutes
+    maxAttempts: 5,
+  }
+})
+```
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with Arraf Auth in under 5 minutes
+  </Card>
+  
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed installation guide for all packages and prerequisites
+  </Card>
+  
+  <Card title="Phone + OTP Guide" icon="mobile-screen" href="/guides/phone-otp">
+    Complete guide to implementing phone authentication with OTP
+  </Card>
+  
+  <Card title="API Reference" icon="book" href="/api/create-auth">
+    Explore the complete API documentation
+  </Card>
+</CardGroup>
+
+## Community and Support
+
+Arraf Auth is open source and built for the developer community:
+
+- GitHub: [github.com/arrafauth/arraf-auth](https://github.com/arrafauth/arraf-auth)
+- Report issues and contribute on GitHub
+- MIT License - free for commercial use
+
+<Note>
+  Arraf Auth is in active development. While the core API is stable, some features may evolve based on community feedback.
+</Note>

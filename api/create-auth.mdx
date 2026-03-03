@@ -1,0 +1,105 @@
+---
+title: createAuth
+description: Initialize Arraf Auth with your configuration
+---
+
+## Function Signature
+
+```typescript
+function createAuth(config: AuthConfig): {
+  handler: (req: Request) => Response | Promise<Response>
+  getSession: (req: Request) => Promise<Session | null>
+  $context: AuthContext
+}
+```
+
+## Parameters
+
+<ParamField path="config" type="AuthConfig" required>
+  The authentication configuration object. See [AuthConfig](/api/auth-config) for detailed field descriptions.
+</ParamField>
+
+## Return Value
+
+The `createAuth` function returns an object with three properties:
+
+<ParamField path="handler" type="(req: Request) => Response | Promise<Response>">
+  The HTTP request handler for all authentication routes. Pass incoming requests to this handler to process sign-in, sign-up, OAuth, OTP, and session endpoints.
+</ParamField>
+
+<ParamField path="getSession" type="(req: Request) => Promise<Session | null>">
+  Retrieves the current session from a request. Returns the session object if valid, or `null` if no valid session exists.
+</ParamField>
+
+<ParamField path="$context" type="AuthContext">
+  Internal context object containing the database adapter, session manager, config, and plugins. Useful for advanced use cases and debugging.
+
+  ```typescript
+  interface AuthContext {
+    adapter: DatabaseAdapter
+    sessionManager: SessionManager
+    config: AuthConfig
+    plugins: Plugin[]
+  }
+  ```
+</ParamField>
+
+## Usage Example
+
+```typescript
+import { createAuth } from "@arraf-auth/core"
+import { DrizzleAdapter } from "@arraf-auth/adapter-drizzle"
+import { db } from "./db"
+
+const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: DrizzleAdapter(db),
+  session: {
+    strategy: "database",
+    expiresIn: "7d",
+  },
+  providers: [
+    // OAuth providers here
+  ],
+  trustedOrigins: ["http://localhost:3000"],
+})
+
+// Use the handler in your framework
+export const { handler, getSession } = auth
+
+// Example: Next.js App Router
+export async function POST(req: Request) {
+  return handler(req)
+}
+
+export async function GET(req: Request) {
+  return handler(req)
+}
+
+// Get session in any route
+export async function protectedRoute(req: Request) {
+  const session = await getSession(req)
+  
+  if (!session) {
+    return new Response("Unauthorized", { status: 401 })
+  }
+  
+  return new Response(JSON.stringify({ userId: session.userId }))
+}
+```
+
+<Note>
+  The `handler` automatically manages all authentication routes including `/auth/sign-in`, `/auth/sign-up`, `/auth/sign-out`, `/auth/session`, `/auth/otp/send`, and `/auth/otp/verify`.
+</Note>
+
+<Tip>
+  Use the `$context` property to access internal components for advanced customization or debugging purposes.
+</Tip>
+
+## Related
+
+- [AuthConfig](/api/auth-config)
+- [SessionConfig](/api/session-config)
+- [Database Adapter API](/api/database-adapter)
+- [Prisma Adapter](/api/prisma-adapter)
+- [Drizzle Adapter](/api/drizzle-adapter)

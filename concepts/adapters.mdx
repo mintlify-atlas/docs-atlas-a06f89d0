@@ -1,0 +1,604 @@
+---
+title: Database Adapters
+description: Learn about the database adapter pattern in Arraf Auth and how to use Prisma, Drizzle, or create custom adapters for your database
+---
+
+Arraf Auth uses the adapter pattern to support multiple database solutions. Adapters provide a consistent interface for database operations, allowing you to use your preferred ORM or database without changing your authentication logic.
+
+## What is a Database Adapter?
+
+A database adapter is an object that implements the `DatabaseAdapter` interface, providing methods to interact with your database for authentication-related operations.
+
+```typescript
+interface DatabaseAdapter {
+  // User operations
+  createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User>
+  findUserById(id: string): Promise<User | null>
+  findUserByEmail(email: string): Promise<User | null>
+  findUserByPhone(phone: string): Promise<User | null>
+  updateUser(id: string, data: Partial<User>): Promise<User>
+  deleteUser(id: string): Promise<void>
+  
+  // Session operations
+  createSession(data: Omit<Session, 'id' | 'createdAt'>): Promise<Session>
+  findSession(token: string): Promise<Session | null>
+  updateSession(token: string, data: Partial<Session>): Promise<Session>
+  deleteSession(token: string): Promise<void>
+  deleteUserSessions(userId: string): Promise<void>
+  
+  // Account operations (OAuth, credentials)
+  createAccount(data: Omit<Account, 'id' | 'createdAt'>): Promise<Account>
+  findAccount(providerId: string, accountId: string): Promise<Account | null>
+  findAccountsByUserId(userId: string): Promise<Account[]>
+  
+  // Verification operations (OTP, email verification)
+  createVerification(data: Omit<Verification, 'id' | 'createdAt'>): Promise<Verification>
+  findVerification(identifier: string, type: VerificationType): Promise<Verification | null>
+  updateVerification(id: string, data: Partial<Verification>): Promise<Verification>
+  deleteVerification(id: string): Promise<void>
+  deleteExpiredVerifications(): Promise<void>
+}
+```
+
+See `packages/core/src/types.ts:96-116` for the complete interface definition.
+
+## Why Use Adapters?
+
+The adapter pattern provides several benefits:
+
+<CardGroup cols={2}>
+  <Card title="Database Agnostic" icon="database">
+    Use any database or ORM. Arraf Auth doesn't lock you into a specific solution.
+  </Card>
+  
+  <Card title="Easy Testing" icon="vial">
+    Create mock adapters for testing without a real database.
+  </Card>
+  
+  <Card title="Flexible Schema" icon="table">
+    Extend the default schema with custom fields while maintaining compatibility.
+  </Card>
+  
+  <Card title="Future Proof" icon="rocket">
+    Switch databases or ORMs without changing authentication logic.
+  </Card>
+</CardGroup>
+
+## Available Adapters
+
+Arraf Auth provides official adapters for popular ORMs:
+
+<Tabs>
+  <Tab title="Prisma">
+    The Prisma adapter provides seamless integration with Prisma ORM.
+    
+    **Installation:**
+    ```bash
+    npm install @arraf-auth/prisma-adapter
+    ```
+    
+    **Usage:**
+    ```typescript
+    import { PrismaClient } from '@prisma/client'
+    import { prismaAdapter } from '@arraf-auth/prisma-adapter'
+    import { createAuth } from '@arraf-auth/core'
+    
+    const prisma = new PrismaClient()
+    
+    export const auth = createAuth({
+      secret: process.env.AUTH_SECRET!,
+      database: prismaAdapter(prisma)
+    })
+    ```
+    
+    **Implementation:**
+    The adapter maps Prisma operations to the `DatabaseAdapter` interface. For example:
+    
+    ```typescript
+    // packages/adapters/prisma/src/index.ts:20-23
+    async createUser(data) {
+      const user = await client.user.create({ data })
+      return user as User
+    }
+    
+    // packages/adapters/prisma/src/index.ts:54-57
+    async findSession(token) {
+      const session = await client.session.findUnique({ where: { token } })
+      return session as Session | null
+    }
+    ```
+    
+    **Type Conversion:**
+    The adapter handles type conversion for verification types (underscore to hyphen):
+    
+    ```typescript
+    // packages/adapters/prisma/src/index.ts:10-16
+    function toVerificationType(type: string): VerificationType {
+      return type.replace('_', '-') as VerificationType
+    }
+    
+    function fromVerificationType(type: VerificationType): string {
+      return type.replace('-', '_')
+    }
+    ```
+    
+    Learn more: [Prisma Adapter API](/api/prisma-adapter)
+  </Tab>
+  
+  <Tab title="Drizzle">
+    The Drizzle adapter provides integration with Drizzle ORM for PostgreSQL.
+    
+    **Installation:**
+    ```bash
+    npm install @arraf-auth/drizzle-adapter
+    ```
+    
+    **Usage:**
+    ```typescript
+    import { drizzle } from 'drizzle-orm/postgres-js'
+    import postgres from 'postgres'
+    import { drizzleAdapter } from '@arraf-auth/drizzle-adapter'
+    import { createAuth } from '@arraf-auth/core'
+    
+    const client = postgres(process.env.DATABASE_URL!)
+    const db = drizzle(client)
+    
+    export const auth = createAuth({
+      secret: process.env.AUTH_SECRET!,
+      database: drizzleAdapter(db)
+    })
+    ```
+    
+    **Implementation:**
+    The adapter uses Drizzle's query builder for type-safe database operations:
+    
+    ```typescript
+    // packages/adapters/drizzle/src/index.ts:36-39
+    async createUser(data) {
+      const [user] = await db.insert(users).values(data).returning()
+      return user as User
+    }
+    
+    // packages/adapters/drizzle/src/index.ts:77-82
+    async findSession(token) {
+      const [session] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.token, token))
+      return (session as Session) ?? null
+    }
+    ```
+    
+    **Schema:**
+    The adapter includes pre-defined schema tables:
+    
+    ```typescript
+    import { users, sessions, accounts, verifications } from '@arraf-auth/drizzle-adapter'
+    ```
+    
+    Learn more: [Drizzle Adapter API](/api/drizzle-adapter)
+  </Tab>
+</Tabs>
+
+## Required Database Schema
+
+Your database must include the following tables to work with Arraf Auth:
+
+### Users Table
+
+```typescript
+interface User {
+  id: string              // Primary key
+  email: string | null    // Unique, nullable
+  phone: string | null    // Unique, nullable
+  name: string | null
+  emailVerified: boolean
+  phoneVerified: boolean
+  image: string | null
+  createdAt: Date
+  updatedAt: Date
+}
+```
+
+### Sessions Table
+
+```typescript
+interface Session {
+  id: string              // Primary key
+  userId: string          // Foreign key to User
+  token: string           // Unique
+  expiresAt: Date
+  ipAddress?: string
+  userAgent?: string
+  createdAt: Date
+}
+```
+
+### Accounts Table
+
+```typescript
+interface Account {
+  id: string                      // Primary key
+  userId: string                  // Foreign key to User
+  providerId: string              // 'phone', 'credential', 'google', etc.
+  accountId: string               // Provider-specific user ID
+  accessToken?: string            // OAuth access token or password hash
+  refreshToken?: string           // OAuth refresh token
+  accessTokenExpiresAt?: Date
+  createdAt: Date
+}
+```
+
+Unique constraint on `(providerId, accountId)`.
+
+### Verifications Table
+
+```typescript
+interface Verification {
+  id: string              // Primary key
+  identifier: string      // Email or phone number
+  token: string           // OTP code or verification token
+  type: VerificationType  // 'phone-otp', 'email-otp', etc.
+  expiresAt: Date
+  attempts: number
+  createdAt: Date
+}
+
+type VerificationType =
+  | 'phone-otp'
+  | 'email-otp'
+  | 'email-verification'
+  | 'password-reset'
+  | 'phone-change'
+```
+
+Unique constraint on `(identifier, type)`.
+
+<Info>
+See the full schema definitions in the adapter source code:
+- Prisma: Your Prisma schema file
+- Drizzle: `packages/adapters/drizzle/src/schema.ts`
+</Info>
+
+## Creating a Custom Adapter
+
+You can create a custom adapter for any database or ORM by implementing the `DatabaseAdapter` interface:
+
+```typescript
+import type { DatabaseAdapter, User, Session, Account, Verification, VerificationType } from '@arraf-auth/core'
+import { yourORM } from 'your-orm'
+
+export function customAdapter(client: any): DatabaseAdapter {
+  return {
+    // User operations
+    async createUser(data) {
+      const user = await client.users.insert(data)
+      return user
+    },
+    
+    async findUserById(id) {
+      const user = await client.users.findOne({ id })
+      return user || null
+    },
+    
+    async findUserByEmail(email) {
+      const user = await client.users.findOne({ email })
+      return user || null
+    },
+    
+    async findUserByPhone(phone) {
+      const user = await client.users.findOne({ phone })
+      return user || null
+    },
+    
+    async updateUser(id, data) {
+      const user = await client.users.update(id, data)
+      return user
+    },
+    
+    async deleteUser(id) {
+      await client.users.delete(id)
+    },
+    
+    // Session operations
+    async createSession(data) {
+      const session = await client.sessions.insert(data)
+      return session
+    },
+    
+    async findSession(token) {
+      const session = await client.sessions.findOne({ token })
+      return session || null
+    },
+    
+    async updateSession(token, data) {
+      const session = await client.sessions.update({ token }, data)
+      return session
+    },
+    
+    async deleteSession(token) {
+      await client.sessions.delete({ token })
+    },
+    
+    async deleteUserSessions(userId) {
+      await client.sessions.deleteMany({ userId })
+    },
+    
+    // Account operations
+    async createAccount(data) {
+      const account = await client.accounts.insert(data)
+      return account
+    },
+    
+    async findAccount(providerId, accountId) {
+      const account = await client.accounts.findOne({ providerId, accountId })
+      return account || null
+    },
+    
+    async findAccountsByUserId(userId) {
+      const accounts = await client.accounts.findMany({ userId })
+      return accounts
+    },
+    
+    // Verification operations
+    async createVerification(data) {
+      const verification = await client.verifications.insert(data)
+      return verification
+    },
+    
+    async findVerification(identifier, type) {
+      const verification = await client.verifications.findOne({ identifier, type })
+      return verification || null
+    },
+    
+    async updateVerification(id, data) {
+      const verification = await client.verifications.update(id, data)
+      return verification
+    },
+    
+    async deleteVerification(id) {
+      await client.verifications.delete(id)
+    },
+    
+    async deleteExpiredVerifications() {
+      await client.verifications.deleteMany({
+        expiresAt: { $lt: new Date() }
+      })
+    }
+  }
+}
+```
+
+### Adapter Implementation Guidelines
+
+<AccordionGroup>
+  <Accordion title="Type Safety">
+    Ensure your adapter returns the correct types. Use type assertions if needed:
+    
+    ```typescript
+    async findUserById(id: string): Promise<User | null> {
+      const user = await client.user.findOne({ id })
+      return user as User | null  // Type assertion
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Error Handling">
+    Let errors propagate to the auth layer. Don't catch errors unless you need to transform them:
+    
+    ```typescript
+    // ✅ Good: Let errors propagate
+    async createUser(data) {
+      return await client.user.create(data)
+    }
+    
+    // ❌ Bad: Swallowing errors
+    async createUser(data) {
+      try {
+        return await client.user.create(data)
+      } catch (error) {
+        return null  // Don't do this
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Unique Constraints">
+    Ensure your database enforces unique constraints:
+    
+    - `users.email` (unique, nullable)
+    - `users.phone` (unique, nullable)
+    - `sessions.token` (unique)
+    - `accounts(providerId, accountId)` (composite unique)
+    - `verifications(identifier, type)` (composite unique)
+  </Accordion>
+  
+  <Accordion title="Type Conversions">
+    Some databases may not support certain types. Handle conversions in your adapter:
+    
+    ```typescript
+    // Example: SQLite doesn't support booleans
+    async createUser(data) {
+      return await client.user.create({
+        ...data,
+        emailVerified: data.emailVerified ? 1 : 0,
+        phoneVerified: data.phoneVerified ? 1 : 0
+      })
+    }
+    
+    async findUserById(id) {
+      const user = await client.user.findOne({ id })
+      return {
+        ...user,
+        emailVerified: Boolean(user.emailVerified),
+        phoneVerified: Boolean(user.phoneVerified)
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Soft Deletes">
+    You can implement soft deletes by marking records as deleted instead of removing them:
+    
+    ```typescript
+    async deleteSession(token) {
+      await client.sessions.update(
+        { token },
+        { deletedAt: new Date() }
+      )
+    }
+    
+    async findSession(token) {
+      const session = await client.sessions.findOne({
+        token,
+        deletedAt: null
+      })
+      return session || null
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Adapter Testing
+
+Test your custom adapter thoroughly:
+
+```typescript
+import { describe, it, expect, beforeEach } from 'vitest'
+import { customAdapter } from './custom-adapter'
+
+describe('Custom Adapter', () => {
+  let adapter: DatabaseAdapter
+  
+  beforeEach(async () => {
+    // Setup test database
+    adapter = customAdapter(testClient)
+  })
+  
+  it('creates and finds user by email', async () => {
+    const user = await adapter.createUser({
+      email: 'test@example.com',
+      phone: null,
+      name: 'Test User',
+      emailVerified: false,
+      phoneVerified: false,
+      image: null
+    })
+    
+    expect(user.id).toBeDefined()
+    expect(user.email).toBe('test@example.com')
+    
+    const found = await adapter.findUserByEmail('test@example.com')
+    expect(found?.id).toBe(user.id)
+  })
+  
+  it('creates and finds session', async () => {
+    const user = await adapter.createUser({ /* ... */ })
+    
+    const session = await adapter.createSession({
+      userId: user.id,
+      token: 'session_token_123',
+      expiresAt: new Date(Date.now() + 86400000)
+    })
+    
+    expect(session.id).toBeDefined()
+    expect(session.userId).toBe(user.id)
+    
+    const found = await adapter.findSession('session_token_123')
+    expect(found?.id).toBe(session.id)
+  })
+  
+  // Test all adapter methods...
+})
+```
+
+## Performance Considerations
+
+<CardGroup cols={2}>
+  <Card title="Indexing" icon="bolt">
+    Ensure proper database indexes on:
+    - `users.email`
+    - `users.phone`
+    - `sessions.token`
+    - `sessions.userId`
+    - `accounts(providerId, accountId)`
+    - `verifications(identifier, type)`
+  </Card>
+  
+  <Card title="Connection Pooling" icon="network-wired">
+    Use connection pooling for better performance:
+    ```typescript
+    const pool = new Pool({
+      max: 20,
+      idleTimeoutMillis: 30000
+    })
+    ```
+  </Card>
+  
+  <Card title="Query Optimization" icon="magnifying-glass">
+    Select only needed fields:
+    ```typescript
+    // Instead of SELECT *
+    const user = await db.select(
+      'id', 'email', 'name'
+    ).from(users)
+    ```
+  </Card>
+  
+  <Card title="Cleanup Jobs" icon="broom">
+    Schedule cleanup of expired verifications:
+    ```typescript
+    cron.schedule('0 * * * *', async () => {
+      await adapter.deleteExpiredVerifications()
+    })
+    ```
+  </Card>
+</CardGroup>
+
+## Extending the Schema
+
+You can extend the default schema with custom fields:
+
+```typescript
+// Extend the User interface
+interface ExtendedUser extends User {
+  role: 'user' | 'admin'
+  status: 'active' | 'suspended'
+  lastLoginAt: Date | null
+}
+
+// Update your adapter to handle custom fields
+export function customAdapter(client: any): DatabaseAdapter {
+  return {
+    async createUser(data) {
+      // Add default values for custom fields
+      const user = await client.users.insert({
+        ...data,
+        role: 'user',
+        status: 'active',
+        lastLoginAt: null
+      })
+      return user
+    },
+    // ... other methods
+  }
+}
+```
+
+<Note>
+When extending the schema, ensure your custom fields are optional or have default values to maintain compatibility with the core authentication flows.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Prisma Adapter" icon="database" href="/api/prisma-adapter">
+    Complete API reference for Prisma adapter
+  </Card>
+  <Card title="Drizzle Adapter" icon="database" href="/api/drizzle-adapter">
+    Complete API reference for Drizzle adapter
+  </Card>
+  <Card title="Core API" icon="code" href="/api/database-adapter">
+    DatabaseAdapter interface reference
+  </Card>
+</CardGroup>

@@ -1,0 +1,586 @@
+---
+title: Database Setup
+description: Configure Prisma or Drizzle ORM adapters for Arraf Auth with PostgreSQL, MySQL, or SQLite
+---
+
+Arraf Auth requires a database adapter to store users, sessions, accounts, and verification tokens. This guide covers setting up Prisma and Drizzle adapters.
+
+## Database Schema
+
+Arraf Auth requires four tables:
+
+| Table | Purpose |
+|-------|----------|
+| **User** | Stores user information (email, phone, name) |
+| **Session** | Stores active sessions with tokens |
+| **Account** | Links users to authentication providers |
+| **Verification** | Stores OTP codes and verification tokens |
+
+## Prisma Adapter
+
+<Steps>
+
+### Install Dependencies
+
+```bash
+npm install @arraf-auth/adapter-prisma prisma @prisma/client
+```
+
+### Define Schema
+
+Create `prisma/schema.prisma`:
+
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum VerificationType {
+  phone_otp
+  email_otp
+  email_verification
+  password_reset
+  phone_change
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  phone         String?   @unique
+  name          String?
+  emailVerified Boolean   @default(false)
+  phoneVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  sessions      Session[]
+  accounts      Account[]
+  
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model Account {
+  id                   String    @id @default(cuid())
+  userId               String
+  providerId           String
+  accountId            String
+  accessToken          String?
+  refreshToken         String?
+  accessTokenExpiresAt DateTime?
+  createdAt            DateTime  @default(now())
+  
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String           @id @default(cuid())
+  identifier String
+  token      String
+  type       VerificationType
+  expiresAt  DateTime
+  attempts   Int              @default(0)
+  createdAt  DateTime         @default(now())
+  
+  @@unique([identifier, type])
+  @@index([identifier])
+  @@map("verifications")
+}
+```
+
+### Configure Environment
+
+```bash
+# .env
+DATABASE_URL="postgresql://user:password@localhost:5432/arraf_auth?schema=public"
+```
+
+### Generate and Migrate
+
+```bash
+# Generate Prisma Client
+npx prisma generate
+
+# Create migration
+npx prisma migrate dev --name init
+
+# Apply migration to production
+npx prisma migrate deploy
+```
+
+### Initialize Adapter
+
+```typescript
+import { createAuth } from '@arraf-auth/core'
+import { prismaAdapter } from '@arraf-auth/adapter-prisma'
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
+const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: prismaAdapter(prisma)
+})
+
+export { auth, prisma }
+```
+
+</Steps>
+
+## Drizzle Adapter
+
+<Steps>
+
+### Install Dependencies
+
+```bash
+npm install @arraf-auth/adapter-drizzle drizzle-orm postgres
+npm install -D drizzle-kit
+```
+
+### Define Schema
+
+Create `src/db/schema.ts`:
+
+```typescript
+import {
+  pgTable,
+  text,
+  boolean,
+  timestamp,
+  integer,
+  pgEnum,
+  uniqueIndex,
+  index
+} from 'drizzle-orm/pg-core'
+
+export const verificationTypeEnum = pgEnum('verification_type', [
+  'phone_otp',
+  'email_otp',
+  'email_verification',
+  'password_reset',
+  'phone_change'
+])
+
+export const users = pgTable('users', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  email: text('email').unique(),
+  phone: text('phone').unique(),
+  name: text('name'),
+  emailVerified: boolean('email_verified').notNull().default(false),
+  phoneVerified: boolean('phone_verified').notNull().default(false),
+  image: text('image'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow()
+})
+
+export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  token: text('token').notNull().unique(),
+  expiresAt: timestamp('expires_at').notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at').notNull().defaultNow()
+}, (t) => ({
+  userIdx: index('sessions_user_idx').on(t.userId),
+  tokenIdx: index('sessions_token_idx').on(t.token)
+}))
+
+export const accounts = pgTable('accounts', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  providerId: text('provider_id').notNull(),
+  accountId: text('account_id').notNull(),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  accessTokenExpiresAt: timestamp('access_token_expires_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow()
+}, (t) => ({
+  providerAccountIdx: uniqueIndex('accounts_provider_account_idx').on(t.providerId, t.accountId),
+  userIdx: index('accounts_user_idx').on(t.userId)
+}))
+
+export const verifications = pgTable('verifications', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  identifier: text('identifier').notNull(),
+  token: text('token').notNull(),
+  type: verificationTypeEnum('type').notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  createdAt: timestamp('created_at').notNull().defaultNow()
+}, (t) => ({
+  identifierTypeIdx: uniqueIndex('verifications_identifier_type_idx').on(t.identifier, t.type),
+  identifierIdx: index('verifications_identifier_idx').on(t.identifier)
+}))
+```
+
+### Configure Drizzle
+
+Create `drizzle.config.ts`:
+
+```typescript
+import type { Config } from 'drizzle-kit'
+
+export default {
+  schema: './src/db/schema.ts',
+  out: './drizzle',
+  driver: 'pg',
+  dbCredentials: {
+    connectionString: process.env.DATABASE_URL!
+  }
+} satisfies Config
+```
+
+### Generate Migration
+
+```bash
+# Generate migration SQL
+npx drizzle-kit generate:pg
+
+# Apply migration
+npx drizzle-kit push:pg
+```
+
+### Initialize Database
+
+Create `src/db/index.ts`:
+
+```typescript
+import { drizzle } from 'drizzle-orm/postgres-js'
+import postgres from 'postgres'
+import * as schema from './schema'
+
+const connectionString = process.env.DATABASE_URL!
+
+const client = postgres(connectionString)
+export const db = drizzle(client, { schema })
+```
+
+### Initialize Adapter
+
+```typescript
+import { createAuth } from '@arraf-auth/core'
+import { drizzleAdapter } from '@arraf-auth/adapter-drizzle'
+import { db } from './db'
+
+const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: drizzleAdapter(db)
+})
+
+export { auth, db }
+```
+
+</Steps>
+
+## Adapter Comparison
+
+<CodeGroup>
+
+```typescript Prisma
+import { PrismaClient } from '@prisma/client'
+import { prismaAdapter } from '@arraf-auth/adapter-prisma'
+
+const prisma = new PrismaClient()
+const adapter = prismaAdapter(prisma)
+
+// Pros:
+// - Excellent TypeScript support
+// - Great migrations tooling
+// - Auto-generated types
+// - Good documentation
+
+// Cons:
+// - Larger bundle size
+// - Slower than raw SQL
+```
+
+```typescript Drizzle
+import { drizzle } from 'drizzle-orm/postgres-js'
+import { drizzleAdapter } from '@arraf-auth/adapter-drizzle'
+import postgres from 'postgres'
+
+const client = postgres(process.env.DATABASE_URL!)
+const db = drizzle(client)
+const adapter = drizzleAdapter(db)
+
+// Pros:
+// - Lightweight and fast
+// - SQL-like syntax
+// - Excellent performance
+// - Smaller bundle size
+
+// Cons:
+// - Less mature ecosystem
+// - Migration tooling still evolving
+```
+
+</CodeGroup>
+
+## Database Operations
+
+The adapter interface provides all necessary operations:
+
+```typescript
+interface DatabaseAdapter {
+  // Users
+  createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User>
+  findUserById(id: string): Promise<User | null>
+  findUserByEmail(email: string): Promise<User | null>
+  findUserByPhone(phone: string): Promise<User | null>
+  updateUser(id: string, data: Partial<User>): Promise<User>
+  deleteUser(id: string): Promise<void>
+  
+  // Sessions
+  createSession(data: Omit<Session, 'id' | 'createdAt'>): Promise<Session>
+  findSession(token: string): Promise<Session | null>
+  updateSession(token: string, data: Partial<Session>): Promise<Session>
+  deleteSession(token: string): Promise<void>
+  deleteUserSessions(userId: string): Promise<void>
+  
+  // Accounts
+  createAccount(data: Omit<Account, 'id' | 'createdAt'>): Promise<Account>
+  findAccount(providerId: string, accountId: string): Promise<Account | null>
+  findAccountsByUserId(userId: string): Promise<Account[]>
+  
+  // Verifications
+  createVerification(data: Omit<Verification, 'id' | 'createdAt'>): Promise<Verification>
+  findVerification(identifier: string, type: VerificationType): Promise<Verification | null>
+  updateVerification(id: string, data: Partial<Verification>): Promise<Verification>
+  deleteVerification(id: string): Promise<void>
+  deleteExpiredVerifications(): Promise<void>
+}
+```
+
+## Database Indexes
+
+Critical indexes for performance:
+
+```sql
+-- Users table
+CREATE UNIQUE INDEX users_email_idx ON users(email);
+CREATE UNIQUE INDEX users_phone_idx ON users(phone);
+
+-- Sessions table
+CREATE INDEX sessions_user_idx ON sessions(user_id);
+CREATE UNIQUE INDEX sessions_token_idx ON sessions(token);
+
+-- Accounts table
+CREATE UNIQUE INDEX accounts_provider_account_idx ON accounts(provider_id, account_id);
+CREATE INDEX accounts_user_idx ON accounts(user_id);
+
+-- Verifications table
+CREATE UNIQUE INDEX verifications_identifier_type_idx ON verifications(identifier, type);
+CREATE INDEX verifications_identifier_idx ON verifications(identifier);
+```
+
+<Note>
+These indexes are automatically created when using Prisma or Drizzle with the provided schemas.
+</Note>
+
+## Verification Types
+
+The verification system supports multiple use cases:
+
+```typescript
+type VerificationType =
+  | 'phone-otp'           // Phone number OTP verification
+  | 'email-otp'           // Email OTP verification
+  | 'email-verification'  // Email confirmation links
+  | 'password-reset'      // Password reset tokens
+  | 'phone-change'        // Phone number change verification
+```
+
+Note: In the database, hyphens are converted to underscores (e.g., `phone-otp` → `phone_otp`). This is handled automatically by the adapters (see `prisma/index.ts:10-16` and `drizzle/index.ts:26-32`).
+
+## Cleanup Tasks
+
+Schedule periodic cleanup of expired verifications:
+
+```typescript
+import { auth } from './lib/auth'
+import cron from 'node-cron'
+
+// Run every hour
+cron.schedule('0 * * * *', async () => {
+  try {
+    await auth.adapter.deleteExpiredVerifications()
+    console.log('Cleaned up expired verifications')
+  } catch (error) {
+    console.error('Cleanup failed:', error)
+  }
+})
+```
+
+Or use a serverless function:
+
+```typescript
+// app/api/cron/cleanup/route.ts
+import { auth } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+
+export async function GET(req: Request) {
+  // Verify cron secret
+  const authHeader = req.headers.get('authorization')
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  await auth.adapter.deleteExpiredVerifications()
+  
+  return NextResponse.json({ success: true })
+}
+```
+
+## Multi-Database Support
+
+Arraf Auth adapters work with:
+
+<Tabs>
+  <Tab title="PostgreSQL">
+    ```bash
+    DATABASE_URL="postgresql://user:password@localhost:5432/mydb"
+    ```
+    
+    Best for production. Supports all features.
+  </Tab>
+  
+  <Tab title="MySQL">
+    ```bash
+    DATABASE_URL="mysql://user:password@localhost:3306/mydb"
+    ```
+    
+    Change `provider = "postgresql"` to `provider = "mysql"` in Prisma schema.
+  </Tab>
+  
+  <Tab title="SQLite">
+    ```bash
+    DATABASE_URL="file:./dev.db"
+    ```
+    
+    Good for development. Not recommended for production.
+  </Tab>
+</Tabs>
+
+## Connection Pooling
+
+For serverless environments, use connection pooling:
+
+```typescript
+import { PrismaClient } from '@prisma/client'
+
+declare global {
+  var prisma: PrismaClient | undefined
+}
+
+export const prisma = global.prisma || new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error']
+})
+
+if (process.env.NODE_ENV !== 'production') {
+  global.prisma = prisma
+}
+```
+
+Or use a connection pooler like PgBouncer:
+
+```bash
+# Direct connection
+DATABASE_URL="postgresql://user:password@localhost:5432/mydb"
+
+# Pooled connection
+DATABASE_URL="postgresql://user:password@pooler.example.com:5432/mydb?pgbouncer=true"
+```
+
+<Warning>
+**Important for Serverless:**
+- Use connection pooling to avoid exhausting database connections
+- Close connections properly in serverless functions
+- Consider using Prisma Data Proxy or PlanetScale for auto-scaling
+</Warning>
+
+## Troubleshooting
+
+### Migration Errors
+
+```bash
+# Reset database (development only)
+npx prisma migrate reset
+
+# Create migration without applying
+npx prisma migrate dev --create-only
+
+# View migration status
+npx prisma migrate status
+```
+
+### Type Sync Issues
+
+```bash
+# Regenerate Prisma Client
+npx prisma generate
+
+# Pull schema from database
+npx prisma db pull
+```
+
+### Connection Issues
+
+```typescript
+// Test database connection
+import { prisma } from './lib/auth'
+
+async function testConnection() {
+  try {
+    await prisma.$connect()
+    console.log('Database connected')
+  } catch (error) {
+    console.error('Connection failed:', error)
+  } finally {
+    await prisma.$disconnect()
+  }
+}
+
+testConnection()
+```
+
+<Tip>
+**Best Practices:**
+- Use migrations in production, never `db push`
+- Add unique constraints on email and phone fields
+- Implement soft deletes if you need audit trails
+- Use database-level cascading deletes for related records
+- Index fields used in WHERE clauses
+</Tip>
+
+## Next Steps
+
+- [Implement phone OTP authentication](/guides/phone-otp)
+- [Add OAuth providers](/guides/oauth)
+- [Create custom plugins](/guides/custom-plugins)

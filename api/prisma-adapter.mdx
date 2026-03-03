@@ -1,0 +1,439 @@
+---
+title: Prisma Adapter
+description: Official Prisma database adapter for Arraf Auth
+---
+
+The Prisma adapter enables Arraf Auth to work with any database supported by Prisma, including PostgreSQL, MySQL, SQLite, SQL Server, MongoDB, and CockroachDB.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @arraf-auth/adapter-prisma @prisma/client
+npm install -D prisma
+```
+
+```bash pnpm
+pnpm add @arraf-auth/adapter-prisma @prisma/client
+pnpm add -D prisma
+```
+
+```bash yarn
+yarn add @arraf-auth/adapter-prisma @prisma/client
+yarn add -D prisma
+```
+</CodeGroup>
+
+## Setup
+
+### 1. Define Prisma Schema
+
+Create or update your `prisma/schema.prisma` file with the required models:
+
+<CodeGroup>
+```prisma PostgreSQL
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  phone         String?   @unique
+  name          String?
+  emailVerified Boolean   @default(false)
+  phoneVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions      Session[]
+  accounts      Account[]
+
+  @@map("users")
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  userId      String
+  token       String   @unique
+  expiresAt   DateTime
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model Account {
+  id                   String    @id @default(cuid())
+  userId               String
+  providerId           String
+  accountId            String
+  accessToken          String?
+  refreshToken         String?
+  accessTokenExpiresAt DateTime?
+  createdAt            DateTime  @default(now())
+
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String           @id @default(cuid())
+  identifier String
+  token      String
+  type       VerificationType
+  expiresAt  DateTime
+  attempts   Int              @default(0)
+  createdAt  DateTime         @default(now())
+
+  @@unique([identifier, type])
+  @@index([identifier])
+  @@map("verifications")
+}
+
+enum VerificationType {
+  phone_otp
+  email_otp
+  email_verification
+  password_reset
+  phone_change
+}
+```
+
+```prisma MySQL
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  phone         String?   @unique
+  name          String?
+  emailVerified Boolean   @default(false)
+  phoneVerified Boolean   @default(false)
+  image         String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions      Session[]
+  accounts      Account[]
+
+  @@map("users")
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  userId      String
+  token       String   @unique
+  expiresAt   DateTime
+  ipAddress   String?
+  userAgent   String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model Account {
+  id                   String    @id @default(cuid())
+  userId               String
+  providerId           String
+  accountId            String
+  accessToken          String?   @db.Text
+  refreshToken         String?   @db.Text
+  accessTokenExpiresAt DateTime?
+  createdAt            DateTime  @default(now())
+
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String           @id @default(cuid())
+  identifier String
+  token      String
+  type       VerificationType
+  expiresAt  DateTime
+  attempts   Int              @default(0)
+  createdAt  DateTime         @default(now())
+
+  @@unique([identifier, type])
+  @@index([identifier])
+  @@map("verifications")
+}
+
+enum VerificationType {
+  phone_otp
+  email_otp
+  email_verification
+  password_reset
+  phone_change
+}
+```
+
+```prisma SQLite
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  phone         String?   @unique
+  name          String?
+  emailVerified Boolean   @default(false)
+  phoneVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions      Session[]
+  accounts      Account[]
+
+  @@map("users")
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  userId      String
+  token       String   @unique
+  expiresAt   DateTime
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model Account {
+  id                   String    @id @default(cuid())
+  userId               String
+  providerId           String
+  accountId            String
+  accessToken          String?
+  refreshToken         String?
+  accessTokenExpiresAt DateTime?
+  createdAt            DateTime  @default(now())
+
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  token      String
+  type       String
+  expiresAt  DateTime
+  attempts   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@unique([identifier, type])
+  @@index([identifier])
+  @@map("verifications")
+}
+```
+</CodeGroup>
+
+<Note>
+  **Important Schema Requirements:**
+  - All `id` fields use `@default(cuid())` for collision-resistant IDs
+  - `email` and `phone` are nullable and unique (users can authenticate with either)
+  - Sessions and Accounts use `onDelete: Cascade` to clean up when users are deleted
+  - The `VerificationType` enum uses underscores (`phone_otp`) instead of hyphens
+  - Indexes on `userId` and `token` fields improve query performance
+</Note>
+
+### 2. Generate Prisma Client
+
+Run the Prisma CLI to generate the client and apply migrations:
+
+```bash
+npx prisma generate
+npx prisma migrate dev --name init
+```
+
+### 3. Create Prisma Client Instance
+
+Create a singleton Prisma client instance:
+
+```typescript lib/prisma.ts
+import { PrismaClient } from "@prisma/client"
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined
+}
+
+export const prisma = globalForPrisma.prisma ?? new PrismaClient()
+
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma
+}
+```
+
+### 4. Configure Arraf Auth
+
+Use the Prisma adapter in your Arraf Auth configuration:
+
+```typescript lib/auth.ts
+import { createAuth } from "@arraf-auth/core"
+import { prismaAdapter } from "@arraf-auth/adapter-prisma"
+import { prisma } from "./prisma"
+
+export const auth = createAuth({
+  secret: process.env.AUTH_SECRET!,
+  database: prismaAdapter(prisma),
+  session: {
+    strategy: "database",
+    expiresIn: "7d",
+  },
+})
+```
+
+## Usage with Next.js
+
+<CodeGroup>
+```typescript app/api/auth/[...auth]/route.ts
+import { auth } from "@/lib/auth"
+
+export const { GET, POST } = auth.handler()
+```
+
+```typescript middleware.ts
+import { auth } from "@/lib/auth"
+
+export default auth.middleware()
+
+export const config = {
+  matcher: ["/dashboard/:path*", "/api/:path*"],
+}
+```
+</CodeGroup>
+
+## API Reference
+
+### prismaAdapter
+
+Creates a database adapter for Prisma.
+
+<ParamField path="client" type="PrismaClient" required>
+  An instance of the Prisma client.
+</ParamField>
+
+<ResponseField name="adapter" type="DatabaseAdapter">
+  A database adapter that implements all required methods for Arraf Auth.
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { PrismaClient } from "@prisma/client"
+import { prismaAdapter } from "@arraf-auth/adapter-prisma"
+
+const prisma = new PrismaClient()
+const adapter = prismaAdapter(prisma)
+```
+
+## Schema Field Mapping
+
+The adapter handles automatic conversion between Prisma's enum format and Arraf Auth's type format:
+
+| Arraf Auth Type | Prisma Enum |
+|-----------------|-------------|
+| `phone-otp` | `phone_otp` |
+| `email-otp` | `email_otp` |
+| `email-verification` | `email_verification` |
+| `password-reset` | `password_reset` |
+| `phone-change` | `phone_change` |
+
+<Note>
+  The adapter automatically converts between hyphenated and underscored formats, so you don't need to worry about this in your application code.
+</Note>
+
+## Database Support
+
+The Prisma adapter works with all databases supported by Prisma:
+
+- PostgreSQL
+- MySQL
+- SQLite
+- SQL Server
+- MongoDB (with some schema adjustments)
+- CockroachDB
+
+## Migration from Other Adapters
+
+If you're migrating from another adapter, you can use Prisma's migration tools:
+
+```bash
+# Create a migration from your existing database
+npx prisma db pull
+
+# Generate the Prisma client
+npx prisma generate
+
+# Create a migration file
+npx prisma migrate dev --name migration_from_existing
+```
+
+## Troubleshooting
+
+### Error: PrismaClient is not instantiated
+
+Make sure you're creating a singleton instance of PrismaClient to avoid connection pool issues:
+
+```typescript
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined
+}
+
+export const prisma = globalForPrisma.prisma ?? new PrismaClient()
+```
+
+### Error: Invalid verificationType
+
+Ensure your Prisma schema includes the `VerificationType` enum with all required values using underscores.
+
+## Next Steps
+
+- Learn about the [DatabaseAdapter interface](/api/database-adapter)
+- Explore [session management](/core-concepts/sessions)
+- Set up [OAuth providers](/core-concepts/oauth)
