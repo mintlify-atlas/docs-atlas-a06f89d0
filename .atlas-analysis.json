@@ -1,0 +1,136 @@
+{
+  "projectType": "framework",
+  "projectName": "Arraf Auth",
+  "projectDescription": "TypeScript-first authentication framework providing strictly typed, secure, and extensible identity primitives built for the Saudi Arabia market.",
+  "theme": "palm",
+  "primaryColor": "#2563eb",
+  "lightColor": "#60a5fa",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/authentication-flows",
+              "concepts/session-management",
+              "concepts/plugins",
+              "concepts/adapters"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/phone-otp",
+              "guides/email-password",
+              "guides/oauth",
+              "guides/database-setup",
+              "guides/custom-plugins"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/nextjs",
+              "integrations/express",
+              "integrations/hono"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core",
+            "pages": [
+              "api/create-auth",
+              "api/auth-config",
+              "api/session-config",
+              "api/otp-config"
+            ]
+          },
+          {
+            "group": "Adapters",
+            "pages": [
+              "api/database-adapter",
+              "api/prisma-adapter",
+              "api/drizzle-adapter"
+            ]
+          },
+          {
+            "group": "Providers",
+            "pages": [
+              "api/oauth-provider",
+              "api/sms-provider",
+              "api/google-provider",
+              "api/github-provider"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/user",
+              "api/session",
+              "api/account",
+              "api/verification"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/phone-utilities",
+              "api/otp-utilities",
+              "api/oauth-utilities"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "TypeScript-first with strict type safety",
+    "Phone + OTP authentication (optimized for Saudi market)",
+    "Email/password and OAuth flows",
+    "Plugin system for extensibility",
+    "Multiple database adapters (Prisma, Drizzle)",
+    "Framework integrations (Next.js, Express, Hono)",
+    "Session management (JWT or database)",
+    "SMS provider abstraction"
+  ],
+  "publicApiSurface": [
+    "createAuth",
+    "normalizePhone",
+    "formatPhoneForDisplay",
+    "generateOTP",
+    "verifyOTP",
+    "sendOTP",
+    "generateCodeVerifier",
+    "generateCodeChallenge",
+    "generateState",
+    "buildAuthorizationUrl",
+    "exchangeCodeForTokens",
+    "AuthConfig",
+    "OTPConfig",
+    "SessionConfig",
+    "SMSProvider",
+    "User",
+    "Session",
+    "Account",
+    "Verification",
+    "Plugin",
+    "PluginHooks",
+    "DatabaseAdapter",
+    "OAuthProvider"
+  ]
+}
